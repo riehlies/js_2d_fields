@@ -2532,7 +2532,7 @@ function bindEvents() {
     // plot keys its cached field on it), the display options just redraw. Display or
     // scale changes reset a stored color-scale override, its units no longer match.
     const resetFieldScales = () => {
-        for (const k of ['hfield', 'jfield']) { scaleRanges[k].min = null; scaleRanges[k].max = null; }
+        for (const k of ['hfield', 'jfield', 'sfield']) { scaleRanges[k].min = null; scaleRanges[k].max = null; }
     };
     for (const id of ['plot-field-freq', 'plot-field-display', 'plot-field-scale', 'plot-field-phase',
                       'plot-arrows', 'plot-arrow-density']) {
@@ -2564,6 +2564,7 @@ const scaleRanges = {
     efield: { min: null, max: null },
     hfield: { min: null, max: null },
     jfield: { min: null, max: null },
+    sfield: { min: null, max: null },
     geometry: { min: null, max: null }
 };
 
@@ -2574,6 +2575,7 @@ function getViewType(view) {
     if (view.startsWith('efield')) return 'efield';
     if (view === 'hfield') return 'hfield';
     if (view === 'jfield') return 'jfield';
+    if (view === 'sfield') return 'sfield';
     return 'geometry';
 }
 

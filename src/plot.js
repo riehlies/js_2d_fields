@@ -1,6 +1,7 @@
 // MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
 // added the |H| Field and Current J views (buildMqsTraces, buildCoaxTraces, H field lines,
-// waveguide H arrows, outline shapes) and E / H field arrows on every field view.
+// waveguide H arrows, outline shapes), E / H field arrows on every field view and the
+// Poynting vector (power flow view and ⊙ markers).
 // See FORK_CHANGES.md for the full list of changes.
 
 import { makeStreamlineTraceFromConductors } from './streamlines.js';
@@ -327,6 +328,20 @@ function outlineShapes(solver, maxY) {
     return [...diel, ...cond];
 }
 
+// Colorbar ticks for a log10 color axis: decades, or 1-2-5 steps when the range spans
+// less than two decades, labelled with the actual values.
+function logTicks(zmin, zmax) {
+    let vals = [];
+    for (let k = Math.ceil(zmin); k <= Math.floor(zmax); k++) vals.push(k);
+    if (vals.length < 2) {
+        vals = [];
+        for (let k = Math.floor(zmin) - 1; k <= Math.ceil(zmax); k++)
+            for (const m of [1, 2, 5]) { const v = k + Math.log10(m); if (v >= zmin && v <= zmax) vals.push(v); }
+    }
+    if (vals.length < 2) return {};
+    return { tickvals: vals, ticktext: vals.map(v => (10 ** v).toPrecision(1).replace(/\.0+e/, 'e')) };
+}
+
 // ---- shared color scales (Plotly's definitions), used where colors are computed here ----
 const COLORSCALES = {
     Viridis: [[0, '#440154'], [0.0627, '#48186a'], [0.1255, '#472d7b'], [0.1882, '#424086'],
@@ -334,6 +349,8 @@ const COLORSCALES = {
         [0.5020, '#21918c'], [0.5647, '#1fa088'], [0.6275, '#28ae80'], [0.6902, '#3fbc73'],
         [0.7529, '#5ec962'], [0.8157, '#84d44b'], [0.8784, '#addc30'], [0.9412, '#d8e219'], [1, '#fde725']],
     Hot: [[0, 'rgb(0,0,0)'], [0.3, 'rgb(230,0,0)'], [0.6, 'rgb(255,210,0)'], [1, 'rgb(255,255,255)']],
+    Electric: [[0, 'rgb(0,0,0)'], [0.15, 'rgb(30,0,100)'], [0.4, 'rgb(120,0,100)'], [0.6, 'rgb(160,90,0)'],
+        [0.8, 'rgb(230,200,0)'], [1, 'rgb(255,250,220)']],
     RdBu: [[0, 'rgb(5,10,172)'], [0.35, 'rgb(106,137,247)'], [0.5, 'rgb(190,190,190)'],
         [0.6, 'rgb(220,170,132)'], [0.7, 'rgb(230,145,90)'], [1, 'rgb(178,10,28)']],
 };
@@ -402,12 +419,12 @@ function quiverTrace(r, cp, sp, n) {
 // vector; length from the peak magnitude on a log scale over two decades (the field is
 // singular at conductor corners, a linear length would hide almost every arrow) times
 // the instantaneous fraction, so arrows shrink and flip as ωt runs.
-const ARROW_COLORS = { E: 'rgba(255, 90, 209, 0.95)', H: 'rgba(41, 227, 255, 0.95)' };
+const ARROW_COLORS = { E: 'rgba(70, 150, 255, 0.95)', H: 'rgba(255, 60, 60, 0.95)', S: 'rgba(255, 255, 255, 0.9)' };
 
 function getArrowOptions() {
     const m = document.getElementById('plot-arrows')?.value || '';
     const n = parseInt(document.getElementById('plot-arrow-density')?.value);
-    return { E: m === 'E' || m === 'EH', H: m === 'H' || m === 'EH',
+    return { E: m.includes('E'), H: m.includes('H'), S: m.includes('S'),
              density: Number.isFinite(n) && n >= 4 ? Math.min(n, 80) : 24 };
 }
 
@@ -478,9 +495,10 @@ function hSampler(f) {
 function buildArrowData(solver, xr, yr) {
     const opt = getArrowOptions();
     const out = {};
-    if (!opt.E && !opt.H) return out;
-    const f = opt.H ? ensureMqsField() : (mqsField && mqsField.key === mqsKey() && mqsField.ok ? mqsField : null);
-    const samp = { E: opt.E ? eSampler(solver, f) : null, H: opt.H ? hSampler(f) : null };
+    if (!opt.E && !opt.H && !opt.S) return out;
+    const needH = opt.H || opt.S, needE = opt.E || opt.S;
+    const f = needH ? ensureMqsField() : (mqsField && mqsField.key === mqsKey() && mqsField.ok ? mqsField : null);
+    const samp = { E: needE ? eSampler(solver, f) : null, H: needH ? hSampler(f) : null };
     const ph = getFieldDisplayOptions().phaseDeg * Math.PI / 180, cp = Math.cos(ph), sp = Math.sin(ph);
     const W = xr[1] - xr[0], Hh = yr[1] - yr[0];
     if (!(W > 0 && Hh > 0)) return out;
@@ -507,6 +525,28 @@ function buildArrowData(solver, xr, yr) {
         });
         if (sz < 0) vals.E = vals.E.map(e => e && { xr: -e.xr, xi: -e.xi, yr: -e.yr, yi: -e.yi });
     }
+    // Poynting vector: the time average ½·Re(E × H*) points along z (out of the page
+    // for power flowing towards the viewer), drawn as ⊙ sized by its magnitude on the
+    // same two-decade log scale as the arrows.
+    if (opt.S && vals.E && vals.H) {
+        const sz = vals.E.map((e, k) => {
+            const h = vals.H[k];
+            return (e && h) ? 0.5 * ((e.xr * h.yr + e.xi * h.yi) - (e.yr * h.xr + e.yi * h.xi)) : 0;
+        });
+        const sorted = sz.filter(v => v > 0).sort((p, q) => p - q);
+        const X = [], Y = [], S = [];
+        if (sorted.length) {
+            const ref = sorted[Math.min(sorted.length - 1, Math.floor(0.98 * sorted.length))];
+            sz.forEach((v, idx) => {
+                if (!(v > 1e-2 * ref)) return;
+                const g = Math.min(1, Math.max(0, Math.log10(v / ref) / 2 + 1));
+                X.push(pts[idx][0]); Y.push(pts[idx][1]); S.push(4 + 10 * g);
+            });
+        }
+        out.S = { x: X, y: Y, size: S };
+    }
+    if (!opt.E) delete vals.E;
+    if (!opt.H) delete vals.H;
     const Lcell = 0.9 * Math.min(W / nc, Hh / nr);
     for (const k of Object.keys(vals)) {
         const mags = vals[k].map(v => (v ? Math.sqrt(v.xr * v.xr + v.xi * v.xi + v.yr * v.yr + v.yi * v.yi) : 0));
@@ -544,6 +584,11 @@ function arrowPlaceholders() {
         t.push({ type: 'scatter', mode: 'lines', x: [], y: [], name: `${k} arrows`,
             line: { color: ARROW_COLORS[k], width: 1.4 }, hoverinfo: 'skip', showlegend: true });
     }
+    if (opt.S) {
+        t.push({ type: 'scatter', mode: 'markers', x: [], y: [], name: 'S power flow (⊙ out of page)',
+            marker: { symbol: 'circle-open-dot', size: [], color: ARROW_COLORS.S, line: { width: 1.3 } },
+            hoverinfo: 'skip', showlegend: true });
+    }
     return t;
 }
 
@@ -554,7 +599,9 @@ function updateArrows() {
     const Plotly = getPlotly();
     if (!container || !container.data || !solver || !Plotly || !solver.solution_valid) return;
     const idx = [];
-    container.data.forEach((t, k) => { if (t.name === 'E arrows' || t.name === 'H arrows') idx.push(k); });
+    container.data.forEach((t, k) => {
+        if (t.name === 'E arrows' || t.name === 'H arrows' || (t.name || '').startsWith('S power flow')) idx.push(k);
+    });
     if (!idx.length) return;
     const fl = container._fullLayout || container.layout;
     const xr = fl.xaxis && fl.xaxis.range, yr = fl.yaxis && fl.yaxis.range;
@@ -566,6 +613,94 @@ function updateArrows() {
         xs.push((d[w] && d[w].x) || []); ys.push((d[w] && d[w].y) || []);
     }
     Plotly.restyle(container, { x: xs, y: ys }, idx);
+    const sIdx = idx.find(k => container.data[k].name.startsWith('S power flow'));
+    if (sIdx !== undefined) Plotly.restyle(container, { 'marker.size': [(d.S && d.S.size) || []] }, [sIdx]);
+}
+
+// ---- Power flow view: time-average Poynting vector S_z = ½·Re(E × H*)·ẑ ----------------
+// Normalized to 1 W transmitted power (∫S_z dA = 1 W), so every line type reads the same:
+// W/mm² per watt. E and H come from separately normalized calculations (static E, MQS
+// or closed-form H), so the field product is only used for its shape and sign, and the
+// normalization fixes the scale. Also reports the share of the power flowing inside
+// dielectrics with εr > 1 (the rest flows in air), which is what pulls ε_eff below εr.
+function dielectricAt(solver, x, y) {
+    let er = 1;
+    for (const d of (solver.dielectrics || [])) {
+        if (shapeContains(d, x, y, 0)) er = d.epsilon_r;
+    }
+    return er;
+}
+
+function buildPowerTraces(f, solver, view) {
+    const opt = getFieldDisplayOptions();
+    const unit = 'W/mm²';
+    let traces = [], shapes = [], lo = Infinity, hi = -Infinity;
+    let total = 0, inDiel = 0;
+    let xMM, yMM;
+    if (f.kind === 'radial') {
+        const k = 376.730313668 / Math.sqrt(f.er || 1);
+        const sv = f.rings.map(g => (g.Jr === null ? 0.5 * k * (g.Hr * g.Hr + g.Hi * g.Hi) : null));
+        f.rings.forEach((g, i) => { if (sv[i] !== null) total += sv[i] * Math.PI * (g.r1 * g.r1 - g.r0 * g.r0); });
+        const vals = sv.map(v => (v === null ? null : v / total * 1e-6));
+        const r = buildCoaxTraces({ ...f, _values: vals, _unit: unit }, false, view, 0);
+        r.title = `Power flow S_z (time average) per 1 W transmitted · ${formatFreq(f.f)}`;
+        return r;
+    }
+    const xs = f.x, ys = f.y, nx = xs.length, ny = ys.length;
+    const E = eSampler(solver, f);
+    if (!E) return null;
+    const conds = solver.conductors || [];
+    const Sz = [];
+    for (let j = 0; j < ny; j++) {
+        const row = new Array(nx);
+        for (let i = 0; i < nx; i++) {
+            const x = xs[i], y = ys[j];
+            const hx = f.Hxr[j][i], hy = f.Hyr[j][i];
+            if (!Number.isFinite(hx) || !Number.isFinite(hy) || Number.isFinite(f.J[j][i])
+                || conds.some(c => shapeContains(c, x, y, 0))) { row[i] = null; continue; }
+            const e = E(x, y);
+            if (!e) { row[i] = null; continue; }
+            row[i] = 0.5 * ((e.xr * hy + e.xi * f.Hyi[j][i]) - (e.yr * hx + e.yi * f.Hxi[j][i]));
+        }
+        Sz.push(row);
+    }
+    // Node areas (half the distance to each neighbour), then normalize to +1 W.
+    const dx = Array.from(xs, (v, i) => 0.5 * ((xs[Math.min(nx - 1, i + 1)] - xs[Math.max(0, i - 1)])));
+    const dy = Array.from(ys, (v, j) => 0.5 * ((ys[Math.min(ny - 1, j + 1)] - ys[Math.max(0, j - 1)])));
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        const v = Sz[j][i];
+        if (v === null) continue;
+        const p = v * dx[i] * dy[j];
+        total += p;
+        if (dielectricAt(solver, xs[i], ys[j]) > 1.01) inDiel += p;
+    }
+    if (!(Math.abs(total) > 0)) return null;
+    const raw = Sz.map(row => row.map(v => (v === null ? null : v / total * 1e-6)));   // W/mm² per W
+    const useLog = opt.log;
+    const z = useLog ? raw.map(row => row.map(v => (v === null || v <= 0 ? null : Math.log10(v)))) : raw;
+    for (const row of z) for (const v of row) if (v !== null) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    let zmin = useLog ? Math.max(lo, hi - 4) : 0, zmax = hi;
+    if (!useLog) {
+        const a = [];
+        for (const row of raw) for (const v of row) if (v !== null && v > 0) a.push(v);
+        a.sort((p, q) => p - q);
+        if (a.length) zmax = a[Math.min(a.length - 1, Math.floor(0.99 * a.length))];
+    }
+    const dataMin = zmin, dataMax = zmax;
+    const override = window.getStoredScale ? window.getStoredScale(view) : null;
+    if (override) { zmin = override.min; zmax = override.max; }
+    const colorbar = { title: { text: useLog ? `log₁₀ ${unit}` : unit }, len: 0.8 };
+    if (useLog) Object.assign(colorbar, logTicks(zmin, zmax));
+    xMM = Array.from(xs, v => v * 1000); yMM = Array.from(ys, v => v * 1000);
+    traces.push({ type: 'heatmap', zsmooth: 'best', x: xMM, y: yMM, z, zmin, zmax, customdata: raw,
+        colorscale: 'Electric', colorbar,
+        hovertemplate: `x: %{x:.4f} mm<br>y: %{y:.4f} mm<br>S_z: %{customdata:.3e} ${unit} per W<extra></extra>` });
+    const share = inDiel / total;
+    const anyAir = (solver.dielectrics || []).some(d => d.epsilon_r <= 1.01) || share < 0.999;
+    const shareTxt = (share > 0.001 && anyAir) ? ` · ${(100 * share).toFixed(1)} % in the dielectric` : '';
+    const per = f.kind === 'wg' ? `, ${f.mode}` : (f.differential ? (f.mode === 'even' ? ', even mode' : ', odd mode') : '');
+    const title = `Power flow S_z (time average) per 1 W${per} · ${formatFreq(f.f)}${shareTxt}`;
+    return { traces, shapes, zMin: zmin, zMax: zmax, dataMin, dataMax, title, xMM, yMM };
 }
 
 // Coax: the field depends on the radius only, so it is drawn as filled concentric rings
@@ -573,12 +708,13 @@ function updateArrows() {
 function buildCoaxTraces(r, isH, view, nFieldLines) {
     const opt = getFieldDisplayOptions();
     const ph = opt.phaseDeg * Math.PI / 180, cp = Math.cos(ph), sp = Math.sin(ph);
-    const vals = r.rings.map(g => {
+    const isS = !!r._values;   // power flow view: values precomputed by buildPowerTraces
+    const vals = isS ? r._values : r.rings.map(g => {
         if (isH) return opt.instantaneous ? Math.abs(g.Hr * cp - g.Hi * sp) : Math.hypot(g.Hr, g.Hi);
         if (g.Jr === null) return null;
         return (opt.instantaneous ? (g.Jr * cp - g.Ji * sp) : Math.hypot(g.Jr, g.Ji)) * 1e-6;
     });
-    const signed = !isH && opt.instantaneous;
+    const signed = !isS && !isH && opt.instantaneous;
     const useLog = opt.log && !signed;
     const z = vals.map(v => (v === null ? null : (useLog ? Math.log10(Math.max(v, 1e-30)) : v)));
     let lo = Infinity, hi = -Infinity, absMax = 0;
@@ -591,7 +727,7 @@ function buildCoaxTraces(r, isH, view, nFieldLines) {
     const dataMin = zmin, dataMax = zmax;
     const override = window.getStoredScale ? window.getStoredScale(view) : null;
     if (override) { zmin = override.min; zmax = override.max; }
-    const scale = signed ? 'RdBu' : (isH ? 'Viridis' : 'Hot');
+    const scale = isS ? 'Electric' : (signed ? 'RdBu' : (isH ? 'Viridis' : 'Hot'));
 
     // Ring shapes, merging neighbours of identical (quantized) color. Within each
     // contiguous layer the rings are painted from the outside in, each one filled all
@@ -626,14 +762,10 @@ function buildCoaxTraces(r, isH, view, nFieldLines) {
                 line: { color: 'rgba(255, 255, 255, 0.55)', width: 1 }, fillcolor: 'rgba(0,0,0,0)', layer: 'above' });
         }
     }
-    const unit = isH ? 'A/m' : 'A/mm²';
-    const qty = isH ? '|H|' : (signed ? 'Jz' : '|Jz|');
+    const unit = isS ? 'W/mm²' : (isH ? 'A/m' : 'A/mm²');
+    const qty = isS ? 'S_z' : (isH ? '|H|' : (signed ? 'Jz' : '|Jz|'));
     const colorbar = { title: { text: useLog ? `log₁₀ ${unit}` : unit }, len: 0.8 };
-    if (useLog) {
-        const tv = [];
-        for (let k = Math.ceil(zmin); k <= Math.floor(zmax); k++) tv.push(k);
-        if (tv.length >= 2) { colorbar.tickvals = tv; colorbar.ticktext = tv.map(k => (10 ** k).toExponential(0)); }
-    }
+    if (useLog) Object.assign(colorbar, logTicks(zmin, zmax));
     const R = (r.b + r.tShield) * 1000;
     // Hover probes along the +x radius (one per ring), the colorbar, and the axis extent.
     const probes = r.rings.map((g, k) => ({ x: cxm + 500 * (g.r0 + g.r1), v: vals[k] })).filter(p => p.v !== null);
@@ -719,14 +851,7 @@ function buildMqsTraces(r, isH, view, nFieldLines) {
     const unit = isH ? 'A/m' : 'A/mm²';
     const qty = isH ? '|H|' : (signed ? 'Jz' : (r.Jtr ? '|J|' : '|Jz|'));
     const colorbar = { title: { text: useLog ? `log₁₀ ${unit}` : unit }, len: 0.8 };
-    if (useLog) {
-        const vals = [];
-        for (let k = Math.ceil(zmin); k <= Math.floor(zmax); k++) vals.push(k);
-        if (vals.length >= 2) {
-            colorbar.tickvals = vals;
-            colorbar.ticktext = vals.map(k => (10 ** k).toExponential(0));
-        }
-    }
+    if (useLog) Object.assign(colorbar, logTicks(zmin, zmax));
     const traces = [{
         type: 'heatmap', zsmooth: 'best',
         x: xMM, y: yMM, z, zmin, zmax,
@@ -1003,29 +1128,32 @@ function draw(resetZoom = false) {
         shapes.push(...conductorFillShapes(solver, yArr[nyDisplay - 1]));
     }
 
-    else if ((currentView === "hfield" || currentView === "jfield") && solver.solution_valid) {
+    else if ((currentView === "hfield" || currentView === "jfield" || currentView === "sfield") && solver.solution_valid) {
         const isH = currentView === "hfield";
+        const isS = currentView === "sfield";
         const key = mqsKey();
         const yArr = Array.from(solver.y || []);
         xMM = Array.from(solver.x || [0, 1e-3], v => v * 1000);
         yMM = yArr.map(v => v * 1000);
         const maxY = yArr.length ? yArr[yArr.length - 1] : 0;
         if (!mqsField || mqsField.key !== key) {
-            title = `Computing ${isH ? 'H field' : 'current density'} at ${formatFreq(fieldPlotFreq())}…`;
+            title = `Computing ${isS ? 'power flow' : (isH ? 'H field' : 'current density')} at ${formatFreq(fieldPlotFreq())}…`;
             if (mqsPending !== key && window.requestMqsField) {
                 mqsPending = key;
                 window.requestMqsField(mqsModeIndex(), fieldPlotFreq(), key);
             }
         } else if (!mqsField.ok) {
-            title = `${isH ? 'H field' : 'Current density'} not available (see log)`;
+            title = `${isS ? 'Power flow' : (isH ? 'H field' : 'Current density')} not available (see log)`;
         } else {
             // Field lines in the H view: the Streamlines count, 20 when left empty
             // (an explicit 0 turns them off).
             const slRaw = (document.getElementById('plot-streamlines')?.value || '').trim();
             const nLines = slRaw === '' ? 20 : Math.max(0, parseInt(slRaw) || 0);
-            mqsView = mqsField.kind === 'radial'
+            mqsView = isS ? buildPowerTraces(mqsField, solver, currentView)
+                : mqsField.kind === 'radial'
                 ? buildCoaxTraces(mqsField, isH, currentView, nLines)
                 : buildMqsTraces(mqsField, isH, currentView, nLines);
+            if (!mqsView) title = 'Power flow not available (no E field)';
             title = mqsView.title;
             xMM = mqsView.xMM; yMM = mqsView.yMM;
             zMin = mqsView.zMin; zMax = mqsView.zMax;
@@ -1104,7 +1232,7 @@ function draw(resetZoom = false) {
         });
     } else if (mqsView) {
         traces.push(...mqsView.traces);
-    } else if (currentView === "hfield" || currentView === "jfield") {
+    } else if (currentView === "hfield" || currentView === "jfield" || currentView === "sfield") {
         // Waiting for (or missing) H / J data: invisible scatter keeps the axes.
         traces.push({
             type: "scatter", x: xMM, y: yMM, mode: "markers",
@@ -1272,6 +1400,7 @@ function draw(resetZoom = false) {
                 // closed form for coax and waveguide).
                 viewButtons.push({ label: "|H| Field", method: "skip", args: [] });
                 viewButtons.push({ label: "Current J", method: "skip", args: [] });
+                viewButtons.push({ label: "Power flow S", method: "skip", args: [] });
             }
             // Both the highlighted button and the click handler key off the LABEL, never a
             // fixed index, with Potential absent, "|E| Field" is at index 1, not 2.
@@ -1280,7 +1409,8 @@ function draw(resetZoom = false) {
             const activeLabel = currentView.startsWith("geometry") ? "Geometry"
                 : currentView.startsWith("potential") ? "Potential"
                 : currentView === "hfield" ? "|H| Field"
-                : currentView === "jfield" ? "Current J" : "|E| Field";
+                : currentView === "jfield" ? "Current J"
+                : currentView === "sfield" ? "Power flow S" : "|E| Field";
             menus.push({
                 x: 0.01,
                 y: 1.15,
@@ -1367,7 +1497,8 @@ function draw(resetZoom = false) {
                 setCurrentView(label === "Geometry" ? "geometry"
                     : label === "Potential" ? "potential"
                     : label === "|H| Field" ? "hfield"
-                    : label === "Current J" ? "jfield" : "efield");
+                    : label === "Current J" ? "jfield"
+                    : label === "Power flow S" ? "sfield" : "efield");
             } else {
                 // Mode selector clicked (differential lines only)
                 const plotModeEl = document.getElementById('plot-mode');

@@ -45,13 +45,23 @@ homogeneous fill:
   the wall current K = n × H has a longitudinal and a perimeter component.
   Below cutoff the request is refused (no power to normalize to).
 
-**E / H field arrows** (Plot Options → *Field arrows*: off, E, H, E + H) on
-every field view: arrows of the instantaneous transverse E (magenta) and H
-(cyan) at phase ωt, on a lattice that is re-sampled when zooming or panning.
+**E / H field arrows** (Plot Options → *Field arrows*: off, E, H, E + H,
+S, E + H + S) on every field view: arrows of the instantaneous transverse E
+(blue) and H (red) at phase ωt, on a lattice that is re-sampled when zooming
+or panning. **S** adds the time-average Poynting vector ½Re(E × H*) as white
+⊙ symbols (it points along the line, out of the page), sized by the power
+density.
 Arrow length grows with the field strength on a log scale over two decades
 (the field is singular at conductor edges). E + H shows directly that the
 two are perpendicular everywhere; the sign of E is chosen so that power flows
 in +z, and E arrows are masked inside metal.
+
+**Power flow S view**: color map of the time-average Poynting vector
+S<sub>z</sub> normalized to 1 W transmitted power (W/mm² per watt), with the
+share of the power flowing inside the dielectric in the title. Cross-check:
+for the default microstrip (εr = 4.4, ε<sub>eff</sub> = 3.229) 64.1 % of the
+power flows in the dielectric, close to the filling factor
+(ε<sub>eff</sub> − 1)/(εr − 1) = 65.6 % from the solver's ε<sub>eff</sub>.
 
 ### How the fields are computed
 
@@ -91,7 +101,7 @@ J(s) = K·γ·cosh(γ(d − s)) / sinh(γd), γ = (1 + j)/δ.
 | `src/tri_solver/tri_backend.js` | `TriBackend.mqsFieldAt(f, mode)` runs an exact MQS solve and resamples the fields |
 | `src/tri_solver/resample.js` | `buildLocator` exported |
 | `src/solve_worker.js` | New `mqsField` job, keeps the last simulation's solver |
-| `src/plot.js` | New views, H field lines, coax ring renderer, waveguide H arrows, E / H field arrows on all field views (zoom-aware), conductor outlines instead of fills in these views |
+| `src/plot.js` | New views, H field lines, coax ring renderer, waveguide H arrows, E / H / S field arrows on all field views (zoom-aware), Power flow S view, conductor outlines instead of fills in these views |
 | `src/app_solver.js` | On-demand field request, scale dialog types, plot option handlers (incl. field arrows) |
 | `src/field_solver.html` | Plot options, help text, fork notice in the About tab |
 | `tests/test_mqs_field.js` | **New.** 18 checks: current normalization (exact FEM integral), Ampère's law ±1 A per trace for every MQS path (single-ended, odd/even on half and full domain, stripline), uniform current at 100 kHz, skin decay length = δ at 10 GHz, wall slab current, refusals |
