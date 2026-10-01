@@ -87,7 +87,7 @@ function quantileAxis(vals, lo, hi, n, forced) {
 }
 
 // Bucketed point-in-triangle locator over the mesh.
-function buildLocator(mesh) {
+export function buildLocator(mesh) {
     const { nodes, tris, nTris } = mesh;
     let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
     for (let i = 0; i < mesh.nNodes; i++) {

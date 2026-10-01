@@ -35,6 +35,7 @@ import { staticConductorLoss, solveConductorLoss, computeHtZZMetric,
          projectH, computePoyntingFromProjectedH } from './conductor_loss.js';
 import { csqrt } from './fem_core.js';
 import { mqsConductorLoss, mqsPecInductance, refineSkinBand } from './mqs_loss.js';
+import { buildMqsGrid, resampleMqsField } from './mqs_field.js';
 import { checkMeshQuality } from './tri_mesh.js';
 
 // Below this frequency use the static solve. Above it, the full-wave eigenmode
@@ -2610,7 +2611,10 @@ export class TriBackend {
                 : (st.mqsL = { mesh: mqsMesh, xs: [], ys: [], log: true });
             const rInterp = dispersionInterp(rc, f, rTol);
             const lInterp = dispersionInterp(lc, f, rTol);
-            if (rInterp !== null && rInterp > 0 && lInterp !== null && lInterp > 0) {
+            // A field request (mqsFieldAt) needs the solution vector itself, so it
+            // always takes the exact-solve branch below.
+            const fieldReq = (this._mqsFieldReq && this._mqsFieldReq.mode === mode) ? this._mqsFieldReq : null;
+            if (!fieldReq && rInterp !== null && rInterp > 0 && lInterp !== null && lInterp > 0) {
                 R_total = rInterp;
                 L_internal = lInterp;
                 lossVia = 'mqs';                      // interpolated MQS anchors
@@ -2635,9 +2639,11 @@ export class TriBackend {
             if (mqsMulti) mqsOpts.modeCurrents = this._mqsModeCurrents(mode, st);
             if (anyPlating) mqsOpts.surfaceZs = buildFaceZs(s, cr, f);
             else mqsOpts.Rq = rq;
+            if (fieldReq) mqsOpts.returnField = true;
             let mqs = null;
             try {
                 mqs = mqsConductorLoss(mqsMesh, cr, f, mqsSigma, this.ctx.helpers.solveComplexSymmetric, 0, mqsOpts);
+                if (fieldReq && mqs && mqs.field) fieldReq.out = { mesh: mqsMesh, field: mqs.field, sigma: mqsSigma };
             } catch (e) {
                 // Surface the downgrade instead of silently falling back: an MQS solve
                 // failure here is almost always the factorization exhausting the WASM heap
@@ -2985,6 +2991,59 @@ export class TriBackend {
         // flag would otherwise stay false.
         this.solver.mesh_generated = true;
         return result;
+    }
+
+    // ---- Magnetic field / current density plot --------------------------------
+    // Run an exact MQS eddy-current solve for `mode` at frequency f and resample the
+    // magnetic field and the conductor current density onto a plot grid (see
+    // mqs_field.js). Normalized to 1 A line current (per trace for a differential
+    // pair). Returns { ok: false, reason } where the MQS solve does not apply (shaped
+    // conductors such as coax, a rectangular waveguide, f = 0, perturbation-only
+    // loss method).
+    mqsFieldAt(f, mode, opts = {}) {
+        if (!this.mesh) return { ok: false, reason: 'Solve the structure first.' };
+        if (this._isWG) return { ok: false, reason: 'Not available for the rectangular waveguide (no conductor current model).' };
+        if (!(f > 0)) return { ok: false, reason: 'The current distribution needs a frequency above 0 Hz.' };
+        if (!this.modeNames.includes(mode)) mode = this.modeNames[0];
+        const prevWarnings = this._modeWarnings;
+        this._modeWarnings = [];
+        const req = { mode, f, out: null };
+        this._mqsFieldReq = req;
+        try {
+            this._modeAtFreq(mode, f);
+        } finally {
+            this._mqsFieldReq = null;
+            this._modeWarnings = prevWarnings;
+        }
+        if (!req.out) {
+            return { ok: false, reason: 'The MQS eddy-current solve does not apply to this geometry ' +
+                '(shaped conductors, or the perturbation loss method is selected), or it failed.' };
+        }
+        const { mesh: mqsMesh, field } = req.out;
+        const s = this.solver;
+        const forcedX = [], forcedY = [];
+        for (const c of (s.conductors || [])) {
+            if (c.shape) continue;
+            forcedX.push(c.x_min, c.x_max);
+            forcedY.push(c.y_min, c.y_max);
+        }
+        const grid = buildMqsGrid(mqsMesh, this.domain, field,
+            { resolution: opts.resolution || 400, forcedX, forcedY });
+        const parity = this.symmetry ? (mode === 'odd' ? 'odd' : 'even') : null;
+        const r = resampleMqsField(mqsMesh, field, grid, parity);
+        // Plain arrays of Float32 rows travel cheaply through postMessage.
+        const f32 = (A) => A.map(row => Float32Array.from(row));
+        return {
+            ok: true, f, mode,
+            x: Float64Array.from(r.x), y: Float64Array.from(r.y),
+            H: f32(r.H), Hxr: f32(r.Hxr), Hxi: f32(r.Hxi), Hyr: f32(r.Hyr), Hyi: f32(r.Hyi),
+            J: f32(r.J), Jr: f32(r.Jr), Ji: f32(r.Ji),
+            delta: Math.sqrt(2 / (2 * Math.PI * f * MU0 * req.out.sigma)),
+            deltaWall: field.deltaW,
+            wallPEC: { ...field.wallPEC }, wallThick: { ...field.wallThick },
+            differential: !!s.is_differential,
+            triMesh: { nodes: mqsMesh.nodes, tris: mqsMesh.tris, nTris: mqsMesh.nTris },
+        };
     }
 
     // ---- Mode viewer ----------------------------------------------------------

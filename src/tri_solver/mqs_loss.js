@@ -926,9 +926,26 @@ export function mqsConductorLoss(mesh, condRect, freq, sigma, solveComplexSymmet
     // supplies it (their rough/plated increment is in L_loop above).
     const L_wall = perTrace * X_gw_smooth / omega;
     const alpha_c = Z0 > 0 ? R_total / (2 * Z0) : NaN;
-    return {
+    const out = {
         R_trace, R_gnd, R_total, X_total, L_loop, L_wall, PsiR,
         alpha_c, alpha_c_dBm: alpha_c * 8.686,
         Rs, delta, nDofs: nF, modeZ: Zmode,
     };
+    // Field export for plotting (opts.returnField): everything needed to rebuild the
+    // physical fields from the normalized solve. The physical vector potential is
+    // A = C·A1 (C = Cr + jCi, A1 = sol), so H = (∂A/∂y, −∂A/∂x)/μ0 everywhere, and the
+    // conductor current density is J = σ·C·(u − jω·A1) with u the drive (1, or the
+    // group's complex Cg on the multi-drive path) in signal metal and 0 in passive
+    // ground rects. Normalized to the line current the solve used (1 A per line; the
+    // meshed half of a straddling trace carries I_mesh = 0.5).
+    if (opts.returnField) {
+        out.field = {
+            sol, nF, dofOf, isCondTri, triGroup,
+            Cr, Ci, CgR, CgI, omega, sigma,
+            sym, oddSymmetry: !!opts.oddSymmetry,
+            wallPEC: wp, wallThick: { ...wt }, sigmaW, deltaW,
+            domain: { xmin: xmin_d, xmax: xmax_d, ymin: ymin_d, ymax: ymax_d },
+        };
+    }
+    return out;
 }
