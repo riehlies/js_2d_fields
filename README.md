@@ -5,8 +5,11 @@
 > It adds **|H| Field** and **Current J** views (magnetic field, field lines and
 > conductor current density from the eddy-current solve). Changes by David
 > Riehl, 2026-10-01, see [FORK_CHANGES.md](FORK_CHANGES.md). Licensed under the
-> GNU GPL v3 like the original. The online version linked below is the
-> original, without these changes.
+> GNU GPL v3 like the original. This version runs online at
+> https://advpcb.davidriehl.de/tl/field_solver.html (build the upload folder
+> with `node deploy/make_site.mjs`); the online version linked below is the
+> original, without these changes. Third-party components:
+> [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
 
 ![Header](https://github.com/Ttl/js_2d_fields/blob/master/docs/header.png?raw=true)
 

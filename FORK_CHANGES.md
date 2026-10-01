@@ -107,6 +107,9 @@ J(s) = K·γ·cosh(γ(d − s)) / sinh(γd), γ = (1 + j)/δ.
 | `tests/test_mqs_field.js` | **New.** 18 checks: current normalization (exact FEM integral), Ampère's law ±1 A per trace for every MQS path (single-ended, odd/even on half and full domain, stripline), uniform current at 100 kHz, skin decay length = δ at 10 GHz, wall slab current, refusals |
 | `tests/test_analytic_fields.js` | **New.** 12 checks: Bessel reference values, coax ±1 A and DC limit, R from the plotted coax current vs the solver's R (1 and 10 GHz), waveguide 1 W normalization, α<sub>c</sub> from the plotted wall current vs the solver's α<sub>c</sub>, below-cutoff refusal |
 | `tests/run.mjs` | New tests registered in the fast tier |
+| `src/snp_export.js` | Touchstone header names the hosted version and the original |
+| `deploy/make_site.mjs`, `deploy/htaccess`, `deploy/index.html` | **New.** Upload folder for the hosted version |
+| `THIRD_PARTY_NOTICES.txt` | **New.** Third-party components, licenses and sources |
 
 ## Verification
 
@@ -122,6 +125,46 @@ J(s) = K·γ·cosh(γ(d − s)) / sinh(γd), γ = (1 + j)/δ.
   missing from the repository.
 - `test_gcpw_mqs.js`, `test_symmetry_half_full.js`,
   `test_fullwave_correctness.js` (slow tier, MQS paths): pass unchanged.
+
+## Hosted version and deployment
+
+This version runs at https://advpcb.davidriehl.de/tl/field_solver.html.
+`node deploy/make_site.mjs` (no npm dependencies) builds the upload folder
+`site/tl/`: exactly the files the page loads (found by following the module
+imports), the WebAssembly modules, Plotly, `LICENSE.txt`,
+`THIRD_PARTY_NOTICES.txt`, an `index.html` that redirects the folder URL to
+the solver, and a `.htaccess` (`deploy/htaccess`) that serves `.wasm` with the
+right MIME type, compresses, and makes browsers revalidate every file. The
+modules are shipped unbundled, so the upstream policy of caching for a year
+(meant for the content-hashed `build.sh` output) would leave browsers with
+stale files after an update.
+
+For the hosted version the page metadata (canonical URL, Open Graph) points to
+advpcb.davidriehl.de instead of hforsten.com, the root-relative favicon links
+of the original site are removed, and Touchstone exports name the hosted
+version and the original. The page loads nothing from other servers (Plotly
+is served locally), uses no cookies or browser storage and sends no requests
+besides fetching its own files.
+
+## Licensing
+
+- The project is GPL v3. The About tab carries the notices GPL v3 §5(d)
+  asks of an interactive program: copyright of the original author and of the
+  modifications, the no-warranty statement, a link to the license
+  (`LICENSE.txt`) and to the complete source code (this repository).
+- `THIRD_PARTY_NOTICES.txt` lists every bundled third-party component with its
+  license and exact source: Plotly.js (MIT), Gmsh (GPL-2.0-or-later, pinned
+  commit plus `gmsh.patch`), Open CASCADE 7.5.1 (LGPL-2.1 with exception),
+  Eigen and Spectra (MPL-2.0, pinned commits), and the Emscripten runtime in
+  the WebAssembly loaders (MIT).
+- Distributing the WebAssembly binaries obliges the distributor to provide
+  their corresponding source. This repository contains the C++ sources,
+  patches, pinned submodules and build instructions. The binaries used for the
+  hosted version are the upstream author's build of commit `318300a` (taken
+  from the original site; `solver.js` is the Emscripten loader extracted from
+  its bundled worker). The fork does not change any C++ source. Rebuilding them
+  from this repository (`src/wasm_solver/README.md`) makes the correspondence
+  between binary and source verifiable.
 
 ## WASM binaries
 

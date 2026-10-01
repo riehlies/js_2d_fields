@@ -2,30 +2,19 @@
 <html lang="en">
 <head>
     <!-- MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
-         added the |H| Field / Current J / Power flow views (incl. coax and waveguide), E / H / S field arrows,
-         their plot options and help text,
-         and a fork notice in the About tab. See FORK_CHANGES.md. -->
+         added the |H| Field, Current J and Power flow S views (incl. coax and waveguide), the
+         E / H / S field arrows, their plot options and help text, the fork and license notices
+         in the About tab, and metadata for the hosted version (advpcb.davidriehl.de/tl).
+         See FORK_CHANGES.md. -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-    <link rel="manifest" href="/site.webmanifest">
-    <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
-    <meta name="msapplication-TileColor" content="#da532c">
-    <meta name="theme-color" content="#ffffff">
-    <link rel="canonical" href="https://hforsten.com/field_solver.html">
-    <meta name="author" content="Henrik Forstén" />
-    <meta name="description" content="2D transmission line field solver" />
-    <meta property="og:site_name" content="Henrik's Blog" />
-    <meta property="og:type" content="article"/>
+    <link rel="canonical" href="https://advpcb.davidriehl.de/tl/field_solver.html">
+    <meta name="author" content="Henrik Forstén (original), David Riehl (modifications)" />
+    <meta name="description" content="2D transmission line field solver with E, H, current density and power flow views (modified version of the solver by Henrik Forstén)" />
+    <meta property="og:type" content="website"/>
     <meta property="og:title" content="2D Transmission Line Field Solver"/>
-    <meta property="og:url" content="https://hforsten.com/field_solver.html"/>
-    <meta property="og:description" content="2D transmission line field solver"/>
-    <meta property="article:published_time" content="2026-01-27" />
-    <meta property="article:section" content="Electronics" />
-    <meta property="article:author" content="Henrik Forstén" />
-    <meta property="og:image" content="https://hforsten.com/img/field-solver/header.png"/>
+    <meta property="og:url" content="https://advpcb.davidriehl.de/tl/field_solver.html"/>
+    <meta property="og:description" content="2D transmission line field solver with E, H, current density and power flow views"/>
     <title>2D Transmission Line Field Solver</title>
     <script>
         // Load Plotly dynamically after page renders to avoid blocking
@@ -750,7 +739,8 @@
         <div class="about-content">
             <h2>2D Transmission Line Field Solver</h2>
             <p>by <a href="https://hforsten.com" target="_blank">Henrik Forstén</a> | <a href="https://github.com/Ttl/js_2d_fields" target="_blank">Source code & issues</a></p>
-            <p style="padding: 8px 10px; background: #1f2d3d; border-left: 3px solid #4a9eff; border-radius: 3px;"><b>Modified version.</b> This is a fork of the original solver by Henrik Forstén. The fork adds the <b>|H| Field</b> and <b>Current J</b> views (magnetic field, field lines and conductor current density from the eddy-current solve), changes by David Riehl, 2026. The original is at <a href="https://github.com/Ttl/js_2d_fields" target="_blank">github.com/Ttl/js_2d_fields</a>. Both are licensed under the GNU GPL v3.</p>
+            <p style="padding: 8px 10px; background: #1f2d3d; border-left: 3px solid #4a9eff; border-radius: 3px;"><b>Modified version.</b> This is a modified version (fork) of the original solver by Henrik Forstén. It adds the <b>|H| Field</b>, <b>Current J</b> and <b>Power flow S</b> views and the E / H / S field arrows (magnetic field, conductor and ground current density from the eddy-current solve, closed-form fields for coax and rectangular waveguide, Poynting vector). Modifications by David Riehl, 2026. Source code of this version: <a href="https://github.com/riehlies/js_2d_fields" target="_blank">github.com/riehlies/js_2d_fields</a>, list of changes: <a href="https://github.com/riehlies/js_2d_fields/blob/master/FORK_CHANGES.md" target="_blank">FORK_CHANGES.md</a>. The original is at <a href="https://github.com/Ttl/js_2d_fields" target="_blank">github.com/Ttl/js_2d_fields</a>.</p>
+            <p style="font-size: 0.85em; color: #aaa;">Copyright &copy; Henrik Forstén (original solver), &copy; 2026 David Riehl (modifications). This program is free software: you can redistribute it and/or modify it under the terms of the <a href="LICENSE.txt" target="_blank">GNU General Public License version 3</a>. It is distributed in the hope that it will be useful, but <b>WITHOUT ANY WARRANTY</b>; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. Results are not guaranteed to be correct; verify critical designs independently. The complete corresponding source code, including the build instructions of the WebAssembly modules, is available at <a href="https://github.com/riehlies/js_2d_fields" target="_blank">github.com/riehlies/js_2d_fields</a>. Third-party components and their licenses: <a href="THIRD_PARTY_NOTICES.txt" target="_blank">THIRD_PARTY_NOTICES.txt</a>.</p>
             <p style="color: #888; font-size: 0.85em;">Version: BUILD_VERSION</p>
             <p>A quasi-static and full-wave 2D field solver for transmission line analysis with adaptive mesh refinement.</p>
 

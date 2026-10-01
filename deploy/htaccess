@@ -1,0 +1,26 @@
+# Copyright (C) 2026 David Riehl. Part of a modified version of js_2d_fields
+# (https://github.com/Ttl/js_2d_fields), GNU GPL v3. See FORK_CHANGES.md.
+#
+# Apache configuration for the unbundled deployment built by deploy/make_site.mjs.
+#
+# The files are NOT content-hashed (unlike upstream build.sh, whose src/.htaccess caches
+# for a year), so every file is revalidated on each load. Unchanged files then cost a
+# 304 response, and an update can never leave a browser with a mix of old and new
+# modules. If the server answers with "500 Internal Server Error", the host does not
+# allow one of these directives in .htaccess: delete this file, the solver works
+# without it.
+
+<IfModule mod_mime.c>
+    AddType application/wasm .wasm
+    AddType text/javascript .js .mjs
+</IfModule>
+
+<IfModule mod_headers.c>
+    <FilesMatch "\.(html|js|mjs|css|wasm|txt)$">
+        Header set Cache-Control "no-cache"
+    </FilesMatch>
+</IfModule>
+
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css text/javascript application/javascript application/wasm text/plain
+</IfModule>
