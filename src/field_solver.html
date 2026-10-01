@@ -517,6 +517,28 @@
             <label>Contours</label>
             <input type="number" id="plot-contours" value="20" step="5" min="0" placeholder="None">
         </div>
+        <div class="control-group">
+            <label>H / J frequency <span class="help-icon" onclick="showHelpModal('field_hj', event)">?</span></label>
+            <input type="text" class="unit-input" id="plot-field-freq" value="" placeholder="1 GHz">
+        </div>
+        <div class="control-group">
+            <label>H / J display</label>
+            <select id="plot-field-display">
+                <option value="mag">Peak magnitude</option>
+                <option value="inst">Instantaneous (ωt)</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label>H / J phase ωt (°)</label>
+            <input type="number" id="plot-field-phase" value="0" step="15">
+        </div>
+        <div class="control-group">
+            <label>H / J color scale</label>
+            <select id="plot-field-scale">
+                <option value="log">Logarithmic</option>
+                <option value="linear">Linear</option>
+            </select>
+        </div>
     </div>
     </div>
 
@@ -976,6 +998,8 @@
 
             // Modes tab frequency - GHz
             'modes-freq': 'GHz',
+
+            'plot-field-freq': 'GHz',
         };
 
         return unitMap[inputId] || '';
@@ -1155,6 +1179,10 @@
         modes_shrink_domain: {
             title: 'Shrink open domain',
             body: '<p>Automatically shrink the open field boundaries to reduce the mesh size, can slightly affect the solved &epsilon;<sub>eff</sub>. The far field of an open line carries no guided mode, it only adds modes of the artificial box and shrinking it keeps the Modes solve within the node budget at high frequencies.</p><p>Not available with an enclosure.</p>'
+        },
+        field_hj: {
+            title: 'H field and current density',
+            body: '<p>The <b>|H| Field</b> and <b>Current J</b> views show the magnetic field and the longitudinal current density J<sub>z</sub> at the frequency set here, for a line current of 1 A (1 A per trace for a differential pair, in the selected mode). Values are peak phasor amplitudes, or the instantaneous field at phase &omega;t.</p><p>They come from the eddy-current (MQS) solve of the <b>Full-wave</b> solver, which meshes the conductor interiors, so skin and proximity effect are resolved inside the metal. Switching to one of these views runs one extra solve on the last simulation&rsquo;s mesh (a second or two).</p><p>Ground planes and enclosure walls are boundary conditions of that solve. Their current is reconstructed from the surface current with a 1D skin-depth profile across the plane thickness, which is accurate when the skin depth and the plane thickness are small compared to the width of the return current distribution (in practice above a few MHz for PCB copper). Plating and roughness are applied as post-processing in the loss calculation, the plotted current is that of the smooth bulk metal.</p><p>Not available with the quasi-static solver, for round conductors (coax) or the rectangular waveguide.</p>'
         }
     };
 

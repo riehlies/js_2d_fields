@@ -85,8 +85,23 @@ export function buildMqsGrid(mqsMesh, domain, field, opts = {}) {
     } else {
         addDepth(forcedX, d.xmin, -1, 'left');
     }
+    // Companion lines just outside every metal face (conductor faces, wall surfaces and
+    // the far face of a finite wall). A heatmap cell spans halfway to the neighbouring
+    // grid line, so without them a face cell with data bleeds visibly into the
+    // dielectric next to it (J is undefined there). The offset is just above the grid
+    // builder's de-duplication tolerance so they survive.
+    const res = opts.resolution || 400;
+    const tolX = (domain.x_max - domain.x_min) / (res * 20);
+    const tolY = (domain.y_max - domain.y_min) / (res * 20);
+    const faceX = [...forcedX], faceY = [...forcedY];
+    if (wp.bottom) faceY.push(d.ymin, d.ymin - (wt.bottom ?? Infinity));
+    if (wp.top) faceY.push(d.ymax, d.ymax + (wt.top ?? Infinity));
+    if (wp.right) faceX.push(d.xmax, d.xmax + (wt.right ?? Infinity));
+    for (const v of faceX) if (Number.isFinite(v)) forcedX.push(v - 1.5 * tolX, v + 1.5 * tolX);
+    for (const v of faceY) if (Number.isFinite(v)) forcedY.push(v - 1.5 * tolY, v + 1.5 * tolY);
+    if (field.sym > 1) for (const v of faceX) if (Number.isFinite(v)) forcedX.push(-v - 1.5 * tolX, -v + 1.5 * tolX);
     return buildGridFromMesh(mqsMesh, domain, {
-        resolution: opts.resolution || 400, forcedX, forcedY, mirrorX: field.sym > 1,
+        resolution: res, forcedX, forcedY, mirrorX: field.sym > 1,
     });
 }
 
@@ -211,13 +226,21 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
         return hFrom(evalAt(t, fx, fy));
     };
 
+    // Surface current K_z = (n × H)_z of a wall, n the outward normal of the metal
+    // (pointing into the field region).
+    const surfaceCurrent = (w, hxr, hxi, hyr, hyi) => {
+        if (w === 'bottom') return [-hxr, -hxi];
+        if (w === 'top') return [hxr, hxi];
+        if (w === 'right') return [-hyr, -hyi];
+        return [hyr, hyi];
+    };
+
     const { x, y } = grid;
     const nx = x.length, ny = y.length;
     const mk = () => Array.from({ length: ny }, () => new Float64Array(nx));
     const Hxr = mk(), Hxi = mk(), Hyr = mk(), Hyi = mk();
     const Jr = mk(), Ji = mk();
     const H = mk(), J = mk();
-    let Imeshed = 0;   // not used for scaling, only reported
 
     for (let j = 0; j < ny; j++) {
         for (let i = 0; i < nx; i++) {
@@ -229,18 +252,40 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
             if (parity && qx < 0) { qx = -qx; m = -1; if (parity === 'odd') s = -1; }
             let hxr = NaN, hxi = NaN, hyr = NaN, hyi = NaN, jr = NaN, ji = NaN;
             const t = find(qx, qy);
+            // A grid line lying exactly on a metal face belongs to the metal for J:
+            // the default nudge picks one side, so look at the other sides too. A is
+            // continuous, so evaluating it in the metal triangle is exact there.
+            let tJ = t;
+            if (t >= 0 && !isCondTri[t]) {
+                for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+                    const tt = locate(qx + dx * eps, qy + dy * eps);
+                    if (tt >= 0 && isCondTri[tt]) { tJ = tt; break; }
+                }
+            }
             if (t >= 0) {
                 const p = evalAt(t, qx, qy);
                 ({ hxr, hxi, hyr, hyi } = hFrom(p));
-                const cls = isCondTri[t];
+                const cls = isCondTri[tJ];
                 if (cls) {
+                    const pj = tJ === t ? p : evalAt(tJ, qx, qy);
                     let ur = 0, ui = 0;
                     if (cls === 1) {
-                        if (CgR) { const g = triGroup[t]; ur = CgR[g]; ui = CgI[g]; } else ur = 1;
+                        if (CgR) { const g = triGroup[tJ]; ur = CgR[g]; ui = CgI[g]; } else ur = 1;
                     }
                     // u − jω·A1
-                    const er = ur + omega * p.ai, ei = ui - omega * p.ar;
+                    const er = ur + omega * pj.ai, ei = ui - omega * pj.ar;
                     [jr, ji] = cmul(Cr, Ci, sigma * er, sigma * ei);
+                } else {
+                    // On the surface of a metal wall: the slab current at depth 0.
+                    const onWall = (wp.bottom && Math.abs(qy - dom.ymin) <= eps) ? 'bottom'
+                        : (wp.top && Math.abs(qy - dom.ymax) <= eps) ? 'top'
+                        : (wp.right && Math.abs(qx - dom.xmax) <= eps) ? 'right'
+                        : (wp.left && field.sym === 1 && Math.abs(qx - dom.xmin) <= eps) ? 'left' : null;
+                    if (onWall) {
+                        const prof = slabProfile((wt[onWall] ?? Infinity) / deltaW, 0, deltaW);
+                        const k = surfaceCurrent(onWall, hxr, hxi, hyr, hyi);
+                        [jr, ji] = cmul(k[0], k[1], prof.jr, prof.ji);
+                    }
                 }
             } else {
                 const wl = wallAt(qx, qy);
@@ -249,13 +294,7 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
                     const hs = wallSurfaceH(wl.w, qx, qy);
                     if (hs) {
                         const prof = slabProfile(d / deltaW, wl.s / deltaW, deltaW);
-                        // Surface current K_z = (n × H)_z with n the outward normal of
-                        // the metal (pointing into the field region).
-                        let kr, ki;
-                        if (wl.w === 'bottom') { kr = -hs.hxr; ki = -hs.hxi; }
-                        else if (wl.w === 'top') { kr = hs.hxr; ki = hs.hxi; }
-                        else if (wl.w === 'right') { kr = -hs.hyr; ki = -hs.hyi; }
-                        else { kr = hs.hyr; ki = hs.hyi; }
+                        const [kr, ki] = surfaceCurrent(wl.w, hs.hxr, hs.hxi, hs.hyr, hs.hyi);
                         [jr, ji] = cmul(kr, ki, prof.jr, prof.ji);
                         // Tangential H decays into the wall, the normal component is 0.
                         if (wl.w === 'bottom' || wl.w === 'top') {
@@ -284,7 +323,7 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
             }
         }
     }
-    return { x, y, H, Hxr, Hxi, Hyr, Hyi, J, Jr, Ji, Imeshed };
+    return { x, y, H, Hxr, Hxi, Hyr, Hyi, J, Jr, Ji };
 }
 
 // Net current of each meshed conductor class straight from the FEM solution

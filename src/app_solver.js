@@ -2,7 +2,8 @@ import { Complex } from './complex.js';
 import { computeSParamsSingleEnded, computeSParamsDifferential, sParamTodB, usableSweepPoints } from './sparameters.js';
 import { exportSnP } from './snp_export.js';
 import { draw, drawResultsPlot, drawSParamPlot, drawParameterSweepPlot, setGlobals, setCurrentView, getScaleRange, setScaleRange, getActualDataRange,
-    freeze, unfreeze, isFrozen, conductorFillShapes, dielectricFillShapes, computeGeometryView } from './plot.js';
+    freeze, unfreeze, isFrozen, conductorFillShapes, dielectricFillShapes, computeGeometryView,
+    clearMqsField, setMqsField } from './plot.js';
 import { buildSolverFromParams as _buildSolverFromParams, platingOptions } from './solver_factory.js';
 
 // Lazy Plotly access - allows app to function while Plotly is loading
@@ -1613,6 +1614,8 @@ async function runSimulation() {
     if (ptext) ptext.textContent = '';
     heartbeatStart(ptext);
     log("Starting simulation...");
+    // The H / J field views belong to the previous solve.
+    clearMqsField();
     for (const w of solver.openBoundaryWarnings()) log(`⚠ Warning: ${w}`);
     if (solver.mode_type === 'waveguide') {
         // State the single-mode limitation and the usable band up front, every solve.
@@ -2520,6 +2523,23 @@ function bindEvents() {
         });
     }
 
+    // Plot options - H / J field views. A new frequency requests a new solve (the
+    // plot keys its cached field on it), the display options just redraw. Display or
+    // scale changes reset a stored color-scale override, its units no longer match.
+    const resetFieldScales = () => {
+        for (const k of ['hfield', 'jfield']) { scaleRanges[k].min = null; scaleRanges[k].max = null; }
+    };
+    for (const id of ['plot-field-freq', 'plot-field-display', 'plot-field-scale', 'plot-field-phase']) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        el.addEventListener('change', () => {
+            if (id !== 'plot-field-phase') resetFieldScales();
+            if (solver && solver.solution_valid) draw();
+        });
+    }
+    const phaseEl = document.getElementById('plot-field-phase');
+    if (phaseEl) phaseEl.addEventListener('input', () => { if (solver && solver.solution_valid) draw(); });
+
     // Copy link button
     const copyLinkBtn = document.getElementById('copy-link-btn');
     if (copyLinkBtn) {
@@ -2536,6 +2556,8 @@ function bindEvents() {
 const scaleRanges = {
     potential: { min: null, max: null },
     efield: { min: null, max: null },
+    hfield: { min: null, max: null },
+    jfield: { min: null, max: null },
     geometry: { min: null, max: null }
 };
 
@@ -2544,6 +2566,8 @@ let scaleDialogOpen = false;
 function getViewType(view) {
     if (view === 'potential') return 'potential';
     if (view.startsWith('efield')) return 'efield';
+    if (view === 'hfield') return 'hfield';
+    if (view === 'jfield') return 'jfield';
     return 'geometry';
 }
 
@@ -2717,6 +2741,22 @@ window.getStoredScale = function(view) {
         return { min: stored.min, max: stored.max };
     }
     return null;
+};
+
+// H field / current density on demand (called by plot.js when one of those views has no
+// data for the current mode and frequency). The worker runs an eddy-current solve on the
+// last simulation's mesh. Requests queue behind a running simulation and so always see
+// its final mesh.
+window.requestMqsField = async function(modeIdx, freq, key) {
+    let field;
+    try {
+        ({ field } = await workerJob('mqsField', { freq, modeIdx }));
+    } catch (e) {
+        field = { ok: false, reason: (e && e.message) || String(e) };
+    }
+    if (field && !field.ok) log(`⚠ H / J field: ${field.reason}`);
+    setMqsField(field, key);
+    draw();
 };
 
 function init() {

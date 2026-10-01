@@ -34,6 +34,7 @@ import { InterpolatingSweep } from './interpolating_sweep.js';
 let stopRequested = false;
 let currentId = null;
 let modesSolver = null;   // retained between 'modes' and its follow-up 'modeField' calls
+let simSolver = null;     // retained between 'simulate' and its follow-up 'mqsField' calls
 
 const post = (msg, transfer) => self.postMessage(msg, transfer || []);
 const log = (msg) => post({ id: currentId, type: 'log', msg });
@@ -111,6 +112,9 @@ const MESH_FRACTION = (EST_MESH_PASSES * MESH_PASS_COST) /
 
 async function jobSimulate({ params, frequencies, opts }) {
     const solver = makeSolver(params);
+    // Kept for the follow-up H / J field requests (jobMqsField), which run an extra
+    // eddy-current solve on this solve's mesh.
+    simSolver = solver;
     const p = params;
 
     if (p.sigma < 1e4) throw new Error('Signal line conductivity is too low to be considered a conductor.');
@@ -307,6 +311,31 @@ function jobModeField({ idx }) {
     return { grid: modesSolver.getModeField(idx) || null };
 }
 
+// ---------------------------------------------------------------- H / J field
+
+// Magnetic field and conductor current density of the last simulation at `freq`,
+// from an exact MQS eddy-current solve on its mesh (TriBackend.mqsFieldAt).
+// modeIdx: 0 = odd / single-ended, 1 = even.
+async function jobMqsField({ freq, modeIdx }) {
+    const s = simSolver;
+    if (!s || !s.solution_valid) return { field: { ok: false, reason: 'Solve the structure first.' } };
+    if (s.mesh_backend !== 'triangular' || !s._triBackend) {
+        return { field: { ok: false, reason: 'H field and current density need the Full-wave solver ' +
+            '(its eddy-current solve models the current inside the conductors). ' +
+            'Select Solver: Full-wave and solve again.' } };
+    }
+    const tri = s._triBackend;
+    const mode = tri.modeNames[modeIdx] ?? tri.modeNames[0];
+    progress(0, `H / J field at ${(freq / 1e9).toPrecision(4)} GHz`);
+    const t0 = Date.now();
+    const field = tri.mqsFieldAt(freq, mode);
+    if (field && field.ok) {
+        log(`H / J field (${mode} mode) at ${(freq / 1e9).toPrecision(4)} GHz: ` +
+            `skin depth ${(field.delta * 1e6).toPrecision(3)} µm, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+    }
+    return { field };
+}
+
 // Parameter Sweep
 
 // `points` is precomputed on the main thread: one fully-resolved params object per sweep
@@ -359,6 +388,7 @@ const JOBS = {
     simulate: jobSimulate,
     modes: jobModes,
     modeField: jobModeField,
+    mqsField: jobMqsField,
     paramSweep: jobParamSweep,
 };
 

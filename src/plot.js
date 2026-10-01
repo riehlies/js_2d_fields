@@ -251,6 +251,169 @@ function getScaleRange() {
     return { min: zMin, max: zMax, view: currentView };
 }
 
+// ---- H field / current density views ------------------------------------------------
+// The data comes from an extra eddy-current solve in the worker (TriBackend.mqsFieldAt),
+// requested on demand through window.requestMqsField when one of these views is shown.
+// Each result is tagged with the key it was requested for (solve generation, mode,
+// frequency), a view whose key does not match asks again.
+let mqsField = null;
+let mqsPending = null;
+let mqsGen = 0;
+
+function fieldPlotFreq() {
+    const f = get.inputValue('plot-field-freq');
+    return f > 0 ? f : 1e9;
+}
+
+function mqsModeIndex() {
+    return isDifferentialMode() ? getSelectedModeIndex() : 0;
+}
+
+function mqsKey() {
+    return `${mqsGen}|${mqsModeIndex()}|${fieldPlotFreq()}`;
+}
+
+// A new solve invalidates the cached field (called by app_solver at solve start).
+function clearMqsField() {
+    mqsField = null;
+    mqsPending = null;
+    mqsGen++;
+}
+
+function setMqsField(data, key) {
+    mqsField = { ...(data || { ok: false, reason: 'No data returned.' }), key };
+    if (mqsPending === key) mqsPending = null;
+}
+
+function getFieldDisplayOptions() {
+    const disp = document.getElementById('plot-field-display');
+    const scale = document.getElementById('plot-field-scale');
+    const phase = parseFloat(document.getElementById('plot-field-phase')?.value);
+    return {
+        instantaneous: disp ? disp.value === 'inst' : false,
+        phaseDeg: Number.isFinite(phase) ? phase : 0,
+        log: scale ? scale.value !== 'linear' : true,
+    };
+}
+
+function formatFreq(f) {
+    if (f >= 1e9) return `${+(f / 1e9).toPrecision(4)} GHz`;
+    if (f >= 1e6) return `${+(f / 1e6).toPrecision(4)} MHz`;
+    if (f >= 1e3) return `${+(f / 1e3).toPrecision(4)} kHz`;
+    return `${+f.toPrecision(4)} Hz`;
+}
+
+function formatLength(m) {
+    if (m >= 1e-3) return `${+(m * 1e3).toPrecision(3)} mm`;
+    return `${+(m * 1e6).toPrecision(3)} µm`;
+}
+
+// Conductor and dielectric outlines only. The H and J views show the field inside the
+// metal, so the opaque conductor fills of the other views would hide exactly that.
+function outlineShapes(solver, maxY) {
+    const cond = conductorFillShapes(solver, maxY).map(s => ({
+        ...s,
+        fillcolor: 'rgba(0,0,0,0)',
+        line: s.line && s.line.color === 'rgba(255, 215, 0, 1.0)'
+            ? s.line : { color: 'rgba(255, 255, 255, 0.55)', width: 1 },
+    }));
+    const diel = dielectricFillShapes(solver, maxY, {
+        alpha: 0, airAlpha: 0, layer: 'above', lineColor: 'rgba(200, 200, 200, 0.3)' });
+    return [...diel, ...cond];
+}
+
+// Traces for the |H| / Jz views from a field result. Returns { traces, zMin, zMax,
+// dataMin, dataMax, title }. Magnitudes are peak phasor amplitudes for a 1 A line current.
+function buildMqsTraces(r, isH, view, nContours) {
+    const opt = getFieldDisplayOptions();
+    const xMM = Array.from(r.x, v => v * 1000);
+    const yMM = Array.from(r.y, v => v * 1000);
+    const ph = opt.phaseDeg * Math.PI / 180, cp = Math.cos(ph), sp = Math.sin(ph);
+    const ny = r.y.length, nx = r.x.length;
+    // Raw values in display units: A/m for H, A/mm² for J.
+    const raw = [];
+    for (let j = 0; j < ny; j++) {
+        const row = new Array(nx);
+        for (let i = 0; i < nx; i++) {
+            let v;
+            if (isH) {
+                if (opt.instantaneous) {
+                    const hx = r.Hxr[j][i] * cp - r.Hxi[j][i] * sp;
+                    const hy = r.Hyr[j][i] * cp - r.Hyi[j][i] * sp;
+                    v = Math.hypot(hx, hy);
+                } else v = r.H[j][i];
+            } else {
+                v = opt.instantaneous ? (r.Jr[j][i] * cp - r.Ji[j][i] * sp) * 1e-6 : r.J[j][i] * 1e-6;
+            }
+            row[i] = Number.isFinite(v) ? v : null;
+        }
+        raw.push(row);
+    }
+    const signed = !isH && opt.instantaneous;
+    const useLog = opt.log && !signed;
+    let z = raw;
+    if (useLog) z = raw.map(row => row.map(v => (v === null ? null : Math.log10(Math.max(v, 1e-30)))));
+    let lo = Infinity, hi = -Infinity, absMax = 0;
+    for (const row of z) for (const v of row) {
+        if (v === null) continue;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+    }
+    for (const row of raw) for (const v of row) if (v !== null && Math.abs(v) > absMax) absMax = Math.abs(v);
+    // Linear scales default to the 99th percentile of |value|: the field is singular at
+    // the conductor corners, and a full-range linear scale would leave everything
+    // else at the bottom of the color map.
+    const p99 = (() => {
+        const a = [];
+        for (const row of raw) for (const v of row) if (v !== null && v !== 0) a.push(Math.abs(v));
+        if (!a.length) return absMax;
+        a.sort((p, q) => p - q);
+        return a[Math.min(a.length - 1, Math.floor(0.99 * a.length))] || absMax;
+    })();
+    let zmin, zmax;
+    if (signed) { zmin = -p99; zmax = p99; }
+    else if (useLog) { zmax = hi; zmin = Math.max(lo, hi - (isH ? 3 : 4)); }
+    else { zmin = 0; zmax = p99; }
+    const dataMin = zmin, dataMax = zmax;
+    const override = window.getStoredScale ? window.getStoredScale(view) : null;
+    if (override) { zmin = override.min; zmax = override.max; }
+
+    const unit = isH ? 'A/m' : 'A/mm²';
+    const qty = isH ? '|H|' : (signed ? 'Jz' : '|Jz|');
+    const colorbar = { title: { text: useLog ? `log₁₀ ${unit}` : unit }, len: 0.8 };
+    if (useLog) {
+        const vals = [];
+        for (let k = Math.ceil(zmin); k <= Math.floor(zmax); k++) vals.push(k);
+        if (vals.length >= 2) {
+            colorbar.tickvals = vals;
+            colorbar.ticktext = vals.map(k => (10 ** k).toExponential(0));
+        }
+    }
+    const traces = [{
+        type: 'heatmap', zsmooth: 'best',
+        x: xMM, y: yMM, z, zmin, zmax,
+        customdata: raw,
+        colorscale: signed ? 'RdBu' : (isH ? 'Viridis' : 'Hot'),
+        // Plotly's RdBu runs blue → red with increasing z: positive current (the signal
+        // direction) is red, return current blue.
+        reversescale: false,
+        colorbar,
+        hovertemplate: `x: %{x:.4f} mm<br>y: %{y:.4f} mm<br>${qty}: %{customdata:.3e} ${unit}<extra></extra>`,
+    }];
+    if (isH && nContours > 0 && !opt.instantaneous) {
+        const c = efieldContourTrace(xMM, yMM, raw.map(row => row.map(v => (v === null ? 0 : v))),
+            Math.max(1e-3, 10 ** (useLog ? zmin : Math.log10(Math.max(zmax * 1e-3, 1e-3)))),
+            useLog ? 10 ** zmax : zmax, nContours);
+        c.name = 'H-field contours';
+        traces.push(c);
+    }
+    const per = r.differential ? '1 A per trace' : '1 A';
+    const modeLabel = r.differential ? (r.mode === 'even' ? ', even mode' : ', odd mode') : '';
+    const at = opt.instantaneous ? `, ωt = ${opt.phaseDeg}°` : ' (peak)';
+    const title = `${qty}${at} for ${per}${modeLabel} · ${formatFreq(r.f)} · δ = ${formatLength(r.delta)}`;
+    return { traces, zMin: zmin, zMax: zmax, dataMin, dataMax, title, xMM, yMM };
+}
+
 // Get actual data range (before any user scaling)
 function getActualDataRange() {
     return { min: actualDataMin, max: actualDataMax };
@@ -315,6 +478,7 @@ function draw(resetZoom = false) {
     let zTitle = "";
     let shapes = [];
     let xMM, yMM, nx, ny, nyDisplay;
+    let mqsView = null;   // set by the H / J views
 
     // View selection
     if (currentView === "geometry") {
@@ -468,6 +632,31 @@ function draw(resetZoom = false) {
         shapes.push(...conductorFillShapes(solver, yArr[nyDisplay - 1]));
     }
 
+    else if ((currentView === "hfield" || currentView === "jfield") && solver.solution_valid) {
+        const isH = currentView === "hfield";
+        const key = mqsKey();
+        const yArr = Array.from(solver.y || []);
+        xMM = Array.from(solver.x || [0, 1e-3], v => v * 1000);
+        yMM = yArr.map(v => v * 1000);
+        const maxY = yArr.length ? yArr[yArr.length - 1] : 0;
+        if (!mqsField || mqsField.key !== key) {
+            title = `Computing ${isH ? 'H field' : 'current density'} at ${formatFreq(fieldPlotFreq())}…`;
+            if (mqsPending !== key && window.requestMqsField) {
+                mqsPending = key;
+                window.requestMqsField(mqsModeIndex(), fieldPlotFreq(), key);
+            }
+        } else if (!mqsField.ok) {
+            title = `${isH ? 'H field' : 'Current density'} not available (see log)`;
+        } else {
+            mqsView = buildMqsTraces(mqsField, isH, currentView, plotOptions.contours);
+            title = mqsView.title;
+            xMM = mqsView.xMM; yMM = mqsView.yMM;
+            zMin = mqsView.zMin; zMax = mqsView.zMax;
+            actualDataMin = mqsView.dataMin; actualDataMax = mqsView.dataMax;
+        }
+        shapes.push(...outlineShapes(solver, maxY));
+    }
+
     else {
         title = "No Data Available";
         // Create minimal dummy data
@@ -535,6 +724,14 @@ function draw(resetZoom = false) {
             showlegend: false,
             hoverinfo: "skip"
         });
+    } else if (mqsView) {
+        traces.push(...mqsView.traces);
+    } else if (currentView === "hfield" || currentView === "jfield") {
+        // Waiting for (or missing) H / J data: invisible scatter keeps the axes.
+        traces.push({
+            type: "scatter", x: xMM, y: yMM, mode: "markers",
+            marker: { size: 0, opacity: 0 }, showlegend: false, hoverinfo: "skip"
+        });
     } else if (zData.length > 0) {
         // Field views. Heatmap with optional contour lines.
 
@@ -588,9 +785,11 @@ function draw(resetZoom = false) {
     }
 
     // Mesh overlay
-    if (showMesh && solver.solution_valid && solver.triMesh) {
+    // The H / J views were computed on the skin-refined eddy-current mesh, show that one.
+    const overlayMesh = (mqsView && mqsField && mqsField.triMesh) ? mqsField.triMesh : solver.triMesh;
+    if (showMesh && solver.solution_valid && overlayMesh) {
         // Triangular backend: draw triangle edges (deduped) as one batched trace.
-        const { nodes, tris, nTris } = solver.triMesh;
+        const { nodes, tris, nTris } = overlayMesh;
         const seen = new Set();
         const ex = [], ey = [];
         const nNodesTri = nodes.length / 2;
@@ -682,13 +881,20 @@ function draw(resetZoom = false) {
                     viewButtons.push({ label: "Potential", method: "skip", args: [] });
                 }
                 viewButtons.push({ label: "|E| Field", method: "skip", args: [] });
+                // H field and current density (eddy-current solve, on demand).
+                if (solver.has_potential !== false) {
+                    viewButtons.push({ label: "|H| Field", method: "skip", args: [] });
+                    viewButtons.push({ label: "Current J", method: "skip", args: [] });
+                }
             }
             // Both the highlighted button and the click handler key off the LABEL, never a
             // fixed index, with Potential absent, "|E| Field" is at index 1, not 2.
             // Prefix match so the differential "_odd"/"_even" view variants land on their
             // own button rather than falling through to the first one.
             const activeLabel = currentView.startsWith("geometry") ? "Geometry"
-                : currentView.startsWith("potential") ? "Potential" : "|E| Field";
+                : currentView.startsWith("potential") ? "Potential"
+                : currentView === "hfield" ? "|H| Field"
+                : currentView === "jfield" ? "Current J" : "|E| Field";
             menus.push({
                 x: 0.01,
                 y: 1.15,
@@ -766,7 +972,9 @@ function draw(resetZoom = false) {
                 const btn = event.menu.buttons[event.menu.active];
                 const label = btn && btn.label;
                 setCurrentView(label === "Geometry" ? "geometry"
-                    : label === "Potential" ? "potential" : "efield");
+                    : label === "Potential" ? "potential"
+                    : label === "|H| Field" ? "hfield"
+                    : label === "Current J" ? "jfield" : "efield");
             } else {
                 // Mode selector clicked (differential lines only)
                 const plotModeEl = document.getElementById('plot-mode');
@@ -1351,4 +1559,5 @@ function unfreeze() {
 function isFrozen() { return frozenResultsData !== null; }
 
 export { draw, drawResultsPlot, drawSParamPlot, drawParameterSweepPlot, setGlobals, setCurrentView, getScaleRange, setScaleRange, getActualDataRange,
-    freeze, unfreeze, isFrozen, conductorFillShapes, dielectricFillShapes, computeGeometryView };
+    freeze, unfreeze, isFrozen, conductorFillShapes, dielectricFillShapes, computeGeometryView,
+    clearMqsField, setMqsField };
