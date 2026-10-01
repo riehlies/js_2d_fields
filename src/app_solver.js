@@ -1,5 +1,6 @@
 // MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
-// added the on-demand H / J field request, scale-dialog types and plot option handlers.
+// added the on-demand H / J field request, scale-dialog types and plot option handlers
+// (incl. E / H field arrows).
 // See FORK_CHANGES.md for the full list of changes.
 
 import { Complex } from './complex.js';
@@ -2533,11 +2534,12 @@ function bindEvents() {
     const resetFieldScales = () => {
         for (const k of ['hfield', 'jfield']) { scaleRanges[k].min = null; scaleRanges[k].max = null; }
     };
-    for (const id of ['plot-field-freq', 'plot-field-display', 'plot-field-scale', 'plot-field-phase']) {
+    for (const id of ['plot-field-freq', 'plot-field-display', 'plot-field-scale', 'plot-field-phase',
+                      'plot-arrows', 'plot-arrow-density']) {
         const el = document.getElementById(id);
         if (!el) continue;
         el.addEventListener('change', () => {
-            if (id !== 'plot-field-phase') resetFieldScales();
+            if (['plot-field-freq', 'plot-field-display', 'plot-field-scale'].includes(id)) resetFieldScales();
             if (solver && solver.solution_valid) draw();
         });
     }

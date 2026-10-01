@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
     <!-- MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
-         added the |H| Field / Current J views (incl. coax and waveguide), their plot options and help text,
+         added the |H| Field / Current J views (incl. coax and waveguide), E / H field arrows,
+         their plot options and help text,
          and a fork notice in the About tab. See FORK_CHANGES.md. -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -541,6 +542,19 @@
                 <option value="log">Logarithmic</option>
                 <option value="linear">Linear</option>
             </select>
+        </div>
+        <div class="control-group">
+            <label>Field arrows <span class="help-icon" onclick="showHelpModal('field_arrows', event)">?</span></label>
+            <select id="plot-arrows">
+                <option value="">Off</option>
+                <option value="E">E</option>
+                <option value="H">H</option>
+                <option value="EH">E + H</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label>Arrows across the view</label>
+            <input type="number" id="plot-arrow-density" value="24" min="4" max="80" step="2">
         </div>
     </div>
     </div>
@@ -1183,6 +1197,10 @@
         modes_shrink_domain: {
             title: 'Shrink open domain',
             body: '<p>Automatically shrink the open field boundaries to reduce the mesh size, can slightly affect the solved &epsilon;<sub>eff</sub>. The far field of an open line carries no guided mode, it only adds modes of the artificial box and shrinking it keeps the Modes solve within the node budget at high frequencies.</p><p>Not available with an enclosure.</p>'
+        },
+        field_arrows: {
+            title: 'Field arrows',
+            body: '<p>Draws arrows of the transverse electric field (<span style="color:#ff5ad1">E</span>, magenta), the magnetic field (<span style="color:#29e3ff">H</span>, cyan) or both on top of any field view. With <b>E + H</b> you can see that the two are perpendicular everywhere: E runs from the signal conductor to the ground, H circles around the current.</p><p>The arrows show the instantaneous field at the phase <b>H / J phase &omega;t</b>, so they shrink and reverse as you step through &omega;t. Their length grows with the field strength on a logarithmic scale over two decades, because the field is singular at conductor edges and a linear scale would make almost every arrow invisible. They are re-sampled on a regular lattice whenever you zoom or pan; <b>Arrows across the view</b> sets the lattice density.</p><p>H needs the Full-wave solver (it comes from the same calculation as the |H| Field view) and is normalized like that view. E is the solver&rsquo;s field (exact closed form for coax and waveguide); its sign is chosen so that power flows in +z. Inside conductors E is practically zero, so only H arrows appear there. In the waveguide the arrows show the transverse fields; the longitudinal H<sub>z</sub> points out of the plane.</p>'
         },
         field_hj: {
             title: 'H field and current density',

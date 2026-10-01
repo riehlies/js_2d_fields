@@ -1,12 +1,12 @@
 // MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
 // added the |H| Field and Current J views (buildMqsTraces, buildCoaxTraces, H field lines,
-// waveguide H arrows, outline shapes).
+// waveguide H arrows, outline shapes) and E / H field arrows on every field view.
 // See FORK_CHANGES.md for the full list of changes.
 
 import { makeStreamlineTraceFromConductors } from './streamlines.js';
 import { computeSParamsSingleEnded, computeSParamsDiffAuto, sParamTodB,
          isSelfReferenced, sparamsForPoint, usableSweepPoints } from './sparameters.js';
-import { isComplement, svgRingPath } from './shapes.js';
+import { isComplement, svgRingPath, shapeContains } from './shapes.js';
 
 // Lazy Plotly access - allows app to function while Plotly is loading
 const getPlotly = () => window.Plotly;
@@ -396,6 +396,178 @@ function quiverTrace(r, cp, sp, n) {
     };
 }
 
+// ---- E / H arrows ------------------------------------------------------------------
+// Arrows of the instantaneous transverse E and / or H at phase ωt on a regular lattice
+// over the visible range (re-sampled on zoom / pan). Direction from the instantaneous
+// vector; length from the peak magnitude on a log scale over two decades (the field is
+// singular at conductor corners, a linear length would hide almost every arrow) times
+// the instantaneous fraction, so arrows shrink and flip as ωt runs.
+const ARROW_COLORS = { E: 'rgba(255, 90, 209, 0.95)', H: 'rgba(41, 227, 255, 0.95)' };
+
+function getArrowOptions() {
+    const m = document.getElementById('plot-arrows')?.value || '';
+    const n = parseInt(document.getElementById('plot-arrow-density')?.value);
+    return { E: m === 'E' || m === 'EH', H: m === 'H' || m === 'EH',
+             density: Number.isFinite(n) && n >= 4 ? Math.min(n, 80) : 24 };
+}
+
+// The H / J field for the current mode and frequency, requested if missing.
+function ensureMqsField() {
+    const key = mqsKey();
+    if (mqsField && mqsField.key === key) return mqsField.ok ? mqsField : null;
+    if (mqsPending !== key && window.requestMqsField) {
+        mqsPending = key;
+        window.requestMqsField(mqsModeIndex(), fieldPlotFreq(), key);
+    }
+    return null;
+}
+
+function nearestIndex(arr, v) {
+    const n = arr.length;
+    if (v <= arr[0]) return 0;
+    if (v >= arr[n - 1]) return n - 1;
+    let lo = 0, hi = n - 1;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (arr[mid] <= v) lo = mid; else hi = mid; }
+    return (v - arr[lo] < arr[hi] - v) ? lo : hi;
+}
+
+// Phasor sampler on a rectilinear grid (nearest node): (x, y) [m] → {xr, xi, yr, yi} | null.
+function gridPhasor(xs, ys, Xr, Xi, Yr, Yi) {
+    const x0 = xs[0], x1 = xs[xs.length - 1], y0 = ys[0], y1 = ys[ys.length - 1];
+    return (x, y) => {
+        if (x < x0 || x > x1 || y < y0 || y > y1) return null;
+        const i = nearestIndex(xs, x), j = nearestIndex(ys, y);
+        const xr = Xr[j] && Xr[j][i], yr = Yr[j] && Yr[j][i];
+        if (!Number.isFinite(xr) || !Number.isFinite(yr)) return null;
+        return { xr, xi: Xi ? Xi[j][i] || 0 : 0, yr, yi: Yi ? Yi[j][i] || 0 : 0 };
+    };
+}
+
+// Coax (radial result): Hφ from the rings, E_r = (η0/√εr)·Hφ in the dielectric.
+function coaxPhasor(f, which) {
+    const rings = f.rings, ETA0 = 376.730313668;
+    return (x, y) => {
+        const dx = x - f.cx, dy = y - f.cy, r = Math.hypot(dx, dy);
+        if (!(r > 0) || r > rings[rings.length - 1].r1) return null;
+        let lo = 0, hi = rings.length - 1;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (rings[mid].r1 < r) lo = mid + 1; else hi = mid; }
+        const g = rings[lo];
+        const c = dx / r, sn = dy / r;
+        if (which === 'H') return { xr: -g.Hr * sn, xi: -g.Hi * sn, yr: g.Hr * c, yi: g.Hi * c };
+        if (g.Jr !== null) return null;   // E only in the dielectric
+        const k = ETA0 / Math.sqrt(f.er || 1);
+        return { xr: k * g.Hr * c, xi: k * g.Hi * c, yr: k * g.Hr * sn, yi: k * g.Hi * sn };
+    };
+}
+
+function eSampler(solver, f) {
+    if (f && f.kind === 'wg' && f.Exr) return gridPhasor(f.x, f.y, f.Exr, null, f.Eyr, null);
+    if (f && f.kind === 'radial') return coaxPhasor(f, 'E');
+    const { Ex, Ey } = getFields();
+    if (!Ex || !Ey || !solver.x || !solver.y) return null;
+    return gridPhasor(solver.x, solver.y, Ex, null, Ey, null);
+}
+
+function hSampler(f) {
+    if (!f) return null;
+    if (f.kind === 'radial') return coaxPhasor(f, 'H');
+    return gridPhasor(f.x, f.y, f.Hxr, f.Hxi, f.Hyr, f.Hyi);
+}
+
+// Arrow polylines (mm) for the visible ranges xr, yr (mm). Returns { E: {x, y}, H: {x, y} }.
+function buildArrowData(solver, xr, yr) {
+    const opt = getArrowOptions();
+    const out = {};
+    if (!opt.E && !opt.H) return out;
+    const f = opt.H ? ensureMqsField() : (mqsField && mqsField.key === mqsKey() && mqsField.ok ? mqsField : null);
+    const samp = { E: opt.E ? eSampler(solver, f) : null, H: opt.H ? hSampler(f) : null };
+    const ph = getFieldDisplayOptions().phaseDeg * Math.PI / 180, cp = Math.cos(ph), sp = Math.sin(ph);
+    const W = xr[1] - xr[0], Hh = yr[1] - yr[0];
+    if (!(W > 0 && Hh > 0)) return out;
+    const nc = opt.density, nr = Math.max(2, Math.round(nc * Hh / W));
+    const pts = [];
+    for (let a = 0; a < nr; a++) for (let c = 0; c < nc; c++)
+        pts.push([xr[0] + W * (c + 0.5) / nc, yr[0] + Hh * (a + 0.5) / nr]);
+    const vals = {};
+    // E is zero inside metal; the static field grid can carry small difference values
+    // there, so E arrows are masked by the conductor geometry.
+    const conds = solver.conductors || [];
+    const inMetal = (x, y) => conds.some(c => shapeContains(c, x, y, 0));
+    for (const k of ['E', 'H']) {
+        if (!samp[k]) continue;
+        vals[k] = pts.map(([x, y]) => (k === 'E' && inMetal(x / 1000, y / 1000)) ? null : samp[k](x / 1000, y / 1000));
+    }
+    // Power flows along +z: if the time-average E × H* of the sampled fields points the
+    // other way (the static E and the MQS H are normalized independently), flip E.
+    if (vals.E && vals.H) {
+        let sz = 0;
+        vals.E.forEach((e, k) => {
+            const h = vals.H[k];
+            if (e && h) sz += (e.xr * h.yr + e.xi * h.yi) - (e.yr * h.xr + e.yi * h.xi);
+        });
+        if (sz < 0) vals.E = vals.E.map(e => e && { xr: -e.xr, xi: -e.xi, yr: -e.yr, yi: -e.yi });
+    }
+    const Lcell = 0.9 * Math.min(W / nc, Hh / nr);
+    for (const k of Object.keys(vals)) {
+        const mags = vals[k].map(v => (v ? Math.sqrt(v.xr * v.xr + v.xi * v.xi + v.yr * v.yr + v.yi * v.yi) : 0));
+        const sorted = mags.filter(m => m > 0).sort((p, q) => p - q);
+        if (!sorted.length) { out[k] = { x: [], y: [] }; continue; }
+        const ref = sorted[Math.min(sorted.length - 1, Math.floor(0.98 * sorted.length))];
+        const X = [], Y = [];
+        vals[k].forEach((v, idx) => {
+            const m = mags[idx];
+            if (!v || !(m > 1e-3 * ref)) return;
+            const ix = v.xr * cp - v.xi * sp, iy = v.yr * cp - v.yi * sp;
+            const im = Math.hypot(ix, iy);
+            if (!(im > 1e-3 * m)) return;
+            const g = Math.min(1, Math.max(0, (Math.log10(m / ref) + 2) / 2));
+            const L = Lcell * (0.3 + 0.7 * g) * Math.min(1, im / m);
+            if (L < 0.08 * Lcell) return;
+            const ux = ix / im, uy = iy / im;
+            const [x, y] = pts[idx];
+            const xa = x - 0.5 * L * ux, ya = y - 0.5 * L * uy, xb = x + 0.5 * L * ux, yb = y + 0.5 * L * uy;
+            const hl = 0.35 * L, ca = Math.cos(Math.PI / 7), sa = Math.sin(Math.PI / 7);
+            X.push(xa, xb, null, xb, xb + hl * (-ux * ca + uy * sa), null, xb, xb + hl * (-ux * ca - uy * sa), null);
+            Y.push(ya, yb, null, yb, yb + hl * (-uy * ca - ux * sa), null, yb, yb + hl * (-uy * ca + ux * sa), null);
+        });
+        out[k] = { x: X, y: Y };
+    }
+    return out;
+}
+
+// Placeholder traces, filled by updateArrows() once the axis ranges are known.
+function arrowPlaceholders() {
+    const opt = getArrowOptions();
+    const t = [];
+    for (const k of ['E', 'H']) {
+        if (!opt[k]) continue;
+        t.push({ type: 'scatter', mode: 'lines', x: [], y: [], name: `${k} arrows`,
+            line: { color: ARROW_COLORS[k], width: 1.4 }, hoverinfo: 'skip', showlegend: true });
+    }
+    return t;
+}
+
+// Re-sample the arrows for the current axis ranges.
+function updateArrows() {
+    const container = document.getElementById('sim_canvas');
+    const solver = get.solver();
+    const Plotly = getPlotly();
+    if (!container || !container.data || !solver || !Plotly || !solver.solution_valid) return;
+    const idx = [];
+    container.data.forEach((t, k) => { if (t.name === 'E arrows' || t.name === 'H arrows') idx.push(k); });
+    if (!idx.length) return;
+    const fl = container._fullLayout || container.layout;
+    const xr = fl.xaxis && fl.xaxis.range, yr = fl.yaxis && fl.yaxis.range;
+    if (!xr || !yr) return;
+    const d = buildArrowData(solver, [Math.min(...xr), Math.max(...xr)], [Math.min(...yr), Math.max(...yr)]);
+    const xs = [], ys = [];
+    for (const k of idx) {
+        const w = container.data[k].name[0];
+        xs.push((d[w] && d[w].x) || []); ys.push((d[w] && d[w].y) || []);
+    }
+    Plotly.restyle(container, { x: xs, y: ys }, idx);
+}
+
 // Coax: the field depends on the radius only, so it is drawn as filled concentric rings
 // (exactly round at any zoom, skin layers included) instead of a rectilinear heatmap.
 function buildCoaxTraces(r, isH, view, nFieldLines) {
@@ -566,7 +738,7 @@ function buildMqsTraces(r, isH, view, nFieldLines) {
         colorbar,
         hovertemplate: `x: %{x:.4f} mm<br>y: %{y:.4f} mm<br>${qty}: %{customdata:.3e} ${unit}<extra></extra>`,
     }];
-    if (isH && nFieldLines > 0 && r.kind === 'wg') {
+    if (isH && nFieldLines > 0 && r.kind === 'wg' && !getArrowOptions().H) {
         // Waveguide: the transverse H is not divergence-free in the cross-section (its
         // sources are ∂Hz/∂z), so it has no potential to draw contours of. Arrows of the
         // instantaneous transverse field instead.
@@ -990,6 +1162,13 @@ function draw(resetZoom = false) {
         }
     }
 
+    // E / H arrows (filled by updateArrows once the axis ranges are known).
+    const arrowTr = solver.solution_valid ? arrowPlaceholders() : [];
+    if (arrowTr.length) {
+        for (const t of traces) if (t.showlegend === undefined) t.showlegend = false;
+        traces.push(...arrowTr);
+    }
+
     // Mesh overlay
     // The H / J views were computed on the skin-refined eddy-current mesh, show that one.
     const overlayMesh = (mqsView && mqsField && mqsField.triMesh) ? mqsField.triMesh : solver.triMesh;
@@ -1066,7 +1245,9 @@ function draw(resetZoom = false) {
             zerolinecolor: '#555'
         },
         margin: { l: 70, r: 90, t: 50, b: 60 },
-        showlegend: false,
+        showlegend: arrowTr.length > 0,
+        legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top', bgcolor: 'rgba(30,30,30,0.7)',
+                  bordercolor: '#555', borderwidth: 1, font: { color: '#ddd', size: 11 } },
         hovermode: "closest",
         dragmode: "pan",
         paper_bgcolor: '#2a2a2a',
@@ -1163,6 +1344,13 @@ function draw(resetZoom = false) {
     };
 
     Plotly.react(container, traces, layout, config);
+    if (arrowTr.length) updateArrows();
+    if (!container._arrowListenerBound) {
+        container.on('plotly_relayout', (ev) => {
+            if (ev && Object.keys(ev).some(k => k.startsWith('xaxis') || k.startsWith('yaxis'))) updateArrows();
+        });
+        container._arrowListenerBound = true;
+    }
 
     if (!container._viewListenerBound) {
         container.on('plotly_buttonclicked', (event) => {

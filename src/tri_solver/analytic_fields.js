@@ -149,6 +149,8 @@ export function coaxFieldAt(s, f) {
     return {
         ok: true, kind: 'radial', f, mode: 'single', delta, deltaWall: delta,
         cx: 0, cy: 0, a, b, tShield: tS, differential: false, per: '1 A',
+        // Dielectric permittivity: E_r = (η0/√εr)·Hφ in the dielectric (TEM).
+        er: s.epsilon_r ?? 1,
         rings: [...inner, ...diel, ...shield].map(g => ({
             r0: g.r0, r1: g.r1, Hr: g.H.re, Hi: g.H.im,
             Jr: g.J ? g.J.re : null, Ji: g.J ? g.J.im : null,
@@ -222,6 +224,11 @@ export function waveguideFieldAt(s, f, opts = {}) {
     const nx = xs.length, ny = ys.length;
     const mk = () => Array.from({ length: ny }, () => new Float32Array(nx).fill(NaN));
     const Hxr = mk(), Hxi = mk(), Hyr = mk(), Hyi = mk(), Hzr = mk(), Hzi = mk(), H = mk();
+    // Transverse E (interior only, real with this phase reference): TE10
+    // Ey = −(ωμ0·a/π)·|A|·sin(πx'/a), TE01 Ex = +(ωμ0·b/π)·|A|·sin(πy'/b), so that
+    // E × H* points along +z (power flows in +z).
+    const Exr = mk(), Eyr = mk();
+    const eAmp = omega * MU0 * L / Math.PI * Aamp;
     const Jr = mk(), Ji = mk(), Jtr = mk(), Jti = mk(), J = mk();
     const tol = 1e-12 * L;
     for (let j = 0; j < ny; j++) {
@@ -231,6 +238,10 @@ export function waveguideFieldAt(s, f, opts = {}) {
             let hx, hy, hz;
             if (inX && inY) {
                 ({ hx, hy, hz } = interior(x, y));
+                const u = along === 'x' ? (x - x0) / W : (y - y0) / Hh;
+                const e = eAmp * Math.sin(Math.PI * u);
+                Exr[j][i] = along === 'x' ? 0 : e;
+                Eyr[j][i] = along === 'x' ? -e : 0;
             } else if (inX || inY) {
                 // Inside one wall (corners are left empty).
                 let wall, depth, fx = x, fy = y;
@@ -262,7 +273,7 @@ export function waveguideFieldAt(s, f, opts = {}) {
     return {
         ok: true, kind: 'wg', f, mode: along === 'x' ? 'TE10' : 'TE01', per: '1 W',
         x: Float64Array.from(xs), y: Float64Array.from(ys),
-        H, Hxr, Hxi, Hyr, Hyi, Hzr, Hzi, J, Jr, Ji, Jtr, Jti,
+        H, Hxr, Hxi, Hyr, Hyi, Hzr, Hzi, J, Jr, Ji, Jtr, Jti, Exr, Eyr,
         delta, deltaWall: delta, beta, differential: false,
     };
 }

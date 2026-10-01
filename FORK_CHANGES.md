@@ -45,6 +45,14 @@ homogeneous fill:
   the wall current K = n × H has a longitudinal and a perimeter component.
   Below cutoff the request is refused (no power to normalize to).
 
+**E / H field arrows** (Plot Options → *Field arrows*: off, E, H, E + H) on
+every field view: arrows of the instantaneous transverse E (magenta) and H
+(cyan) at phase ωt, on a lattice that is re-sampled when zooming or panning.
+Arrow length grows with the field strength on a log scale over two decades
+(the field is singular at conductor edges). E + H shows directly that the
+two are perpendicular everywhere; the sign of E is chosen so that power flows
+in +z, and E arrows are masked inside metal.
+
 ### How the fields are computed
 
 The MQS solve works with the vector potential A<sub>z</sub> on a P2 mesh that
@@ -77,14 +85,14 @@ J(s) = K·γ·cosh(γ(d − s)) / sinh(γd), γ = (1 + j)/δ.
 
 | File | Change |
 |---|---|
-| `src/tri_solver/analytic_fields.js` | **New.** Closed-form coax and waveguide fields, complex Bessel J0/J1 (scaled, overflow-free in the skin-effect regime) |
+| `src/tri_solver/analytic_fields.js` | **New.** Closed-form coax and waveguide fields (H, J, and the waveguide's transverse E), complex Bessel J0/J1 (scaled, overflow-free in the skin-effect regime) |
 | `src/tri_solver/mqs_field.js` | **New.** Resamples H, J and A from the MQS solution onto the plot grid, wall slab current, grid with skin-depth and face lines |
 | `src/tri_solver/mqs_loss.js` | `mqsConductorLoss(…, { returnField: true })` exports the normalized solution |
 | `src/tri_solver/tri_backend.js` | `TriBackend.mqsFieldAt(f, mode)` runs an exact MQS solve and resamples the fields |
 | `src/tri_solver/resample.js` | `buildLocator` exported |
 | `src/solve_worker.js` | New `mqsField` job, keeps the last simulation's solver |
-| `src/plot.js` | New views, H field lines, coax ring renderer, waveguide H arrows, conductor outlines instead of fills in these views |
-| `src/app_solver.js` | On-demand field request, scale dialog types, plot option handlers |
+| `src/plot.js` | New views, H field lines, coax ring renderer, waveguide H arrows, E / H field arrows on all field views (zoom-aware), conductor outlines instead of fills in these views |
+| `src/app_solver.js` | On-demand field request, scale dialog types, plot option handlers (incl. field arrows) |
 | `src/field_solver.html` | Plot options, help text, fork notice in the About tab |
 | `tests/test_mqs_field.js` | **New.** 18 checks: current normalization (exact FEM integral), Ampère's law ±1 A per trace for every MQS path (single-ended, odd/even on half and full domain, stripline), uniform current at 100 kHz, skin decay length = δ at 10 GHz, wall slab current, refusals |
 | `tests/test_analytic_fields.js` | **New.** 12 checks: Bessel reference values, coax ±1 A and DC limit, R from the plotted coax current vs the solver's R (1 and 10 GHz), waveguide 1 W normalization, α<sub>c</sub> from the plotted wall current vs the solver's α<sub>c</sub>, below-cutoff refusal |
