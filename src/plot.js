@@ -1,5 +1,6 @@
 // MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
-// added the |H| Field and Current J views (buildMqsTraces, H field lines, outline shapes).
+// added the |H| Field and Current J views (buildMqsTraces, buildCoaxTraces, H field lines,
+// waveguide H arrows, outline shapes).
 // See FORK_CHANGES.md for the full list of changes.
 
 import { makeStreamlineTraceFromConductors } from './streamlines.js';
@@ -326,6 +327,159 @@ function outlineShapes(solver, maxY) {
     return [...diel, ...cond];
 }
 
+// ---- shared color scales (Plotly's definitions), used where colors are computed here ----
+const COLORSCALES = {
+    Viridis: [[0, '#440154'], [0.0627, '#48186a'], [0.1255, '#472d7b'], [0.1882, '#424086'],
+        [0.2510, '#3b528b'], [0.3137, '#33638d'], [0.3765, '#2c728e'], [0.4392, '#26828e'],
+        [0.5020, '#21918c'], [0.5647, '#1fa088'], [0.6275, '#28ae80'], [0.6902, '#3fbc73'],
+        [0.7529, '#5ec962'], [0.8157, '#84d44b'], [0.8784, '#addc30'], [0.9412, '#d8e219'], [1, '#fde725']],
+    Hot: [[0, 'rgb(0,0,0)'], [0.3, 'rgb(230,0,0)'], [0.6, 'rgb(255,210,0)'], [1, 'rgb(255,255,255)']],
+    RdBu: [[0, 'rgb(5,10,172)'], [0.35, 'rgb(106,137,247)'], [0.5, 'rgb(190,190,190)'],
+        [0.6, 'rgb(220,170,132)'], [0.7, 'rgb(230,145,90)'], [1, 'rgb(178,10,28)']],
+};
+function parseColor(c) {
+    if (c[0] === '#') return [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16));
+    return c.match(/\d+/g).slice(0, 3).map(Number);
+}
+// Color of t ∈ [0, 1] on a scale, quantized to 256 levels (adjacent equal colors merge).
+function colorAt(scale, t) {
+    const st = COLORSCALES[scale];
+    t = Math.round(Math.min(1, Math.max(0, t)) * 255) / 255;
+    for (let i = 1; i < st.length; i++) {
+        if (t <= st[i][0]) {
+            const f = (t - st[i - 1][0]) / (st[i][0] - st[i - 1][0] || 1);
+            const a = parseColor(st[i - 1][1]), b = parseColor(st[i][1]);
+            return `rgb(${a.map((v, k) => Math.round(v + f * (b[k] - v))).join(',')})`;
+        }
+    }
+    return st[st.length - 1][1];
+}
+
+// Arrows of the instantaneous transverse H on a coarse grid (waveguide).
+function quiverTrace(r, cp, sp, n) {
+    let xlo = Infinity, xhi = -Infinity, ylo = Infinity, yhi = -Infinity;
+    const ny = r.y.length, nx = r.x.length;
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        if (!Number.isFinite(r.H[j][i]) || Number.isFinite(r.J[j][i])) continue;   // interior only
+        xlo = Math.min(xlo, r.x[i]); xhi = Math.max(xhi, r.x[i]);
+        ylo = Math.min(ylo, r.y[j]); yhi = Math.max(yhi, r.y[j]);
+    }
+    const W = xhi - xlo, Hh = yhi - ylo;
+    const nc = Math.max(4, Math.round(n * Math.sqrt(W / Hh))), nr = Math.max(3, Math.round(n * Math.sqrt(Hh / W)));
+    const nearest = (arr, v) => { let k = 0; for (let i = 1; i < arr.length; i++) if (Math.abs(arr[i] - v) < Math.abs(arr[k] - v)) k = i; return k; };
+    const pts = [];
+    let vmax = 0;
+    for (let a = 0; a < nr; a++) for (let c = 0; c < nc; c++) {
+        const x = xlo + W * (c + 0.5) / nc, y = ylo + Hh * (a + 0.5) / nr;
+        const i = nearest(r.x, x), j = nearest(r.y, y);
+        const hx = r.Hxr[j][i] * cp - r.Hxi[j][i] * sp, hy = r.Hyr[j][i] * cp - r.Hyi[j][i] * sp;
+        pts.push([x, y, hx, hy]);
+        vmax = Math.max(vmax, Math.hypot(hx, hy));
+    }
+    const X = [], Y = [];
+    const Lmax = 0.85 * Math.min(W / nc, Hh / nr);
+    for (const [x, y, hx, hy] of pts) {
+        const m = Math.hypot(hx, hy);
+        if (!(vmax > 0) || m < 0.02 * vmax) continue;
+        const L = Lmax * m / vmax, ux = hx / m, uy = hy / m;
+        const x0 = x - 0.5 * L * ux, y0 = y - 0.5 * L * uy, x1 = x + 0.5 * L * ux, y1 = y + 0.5 * L * uy;
+        const hl = 0.3 * L, c30 = Math.cos(Math.PI / 7), s30 = Math.sin(Math.PI / 7);
+        const bx = -ux, by = -uy;
+        X.push(x0, x1, null, x1, x1 + hl * (bx * c30 - by * s30), null, x1, x1 + hl * (bx * c30 + by * s30), null);
+        Y.push(y0, y1, null, y1, y1 + hl * (by * c30 + bx * s30), null, y1, y1 + hl * (by * c30 - bx * s30), null);
+    }
+    return {
+        type: 'scatter', mode: 'lines', x: X.map(v => (v === null ? null : v * 1000)),
+        y: Y.map(v => (v === null ? null : v * 1000)),
+        line: { color: 'rgba(255, 255, 255, 0.75)', width: 1.2 },
+        hoverinfo: 'skip', showlegend: false, name: 'H field arrows',
+    };
+}
+
+// Coax: the field depends on the radius only, so it is drawn as filled concentric rings
+// (exactly round at any zoom, skin layers included) instead of a rectilinear heatmap.
+function buildCoaxTraces(r, isH, view, nFieldLines) {
+    const opt = getFieldDisplayOptions();
+    const ph = opt.phaseDeg * Math.PI / 180, cp = Math.cos(ph), sp = Math.sin(ph);
+    const vals = r.rings.map(g => {
+        if (isH) return opt.instantaneous ? Math.abs(g.Hr * cp - g.Hi * sp) : Math.hypot(g.Hr, g.Hi);
+        if (g.Jr === null) return null;
+        return (opt.instantaneous ? (g.Jr * cp - g.Ji * sp) : Math.hypot(g.Jr, g.Ji)) * 1e-6;
+    });
+    const signed = !isH && opt.instantaneous;
+    const useLog = opt.log && !signed;
+    const z = vals.map(v => (v === null ? null : (useLog ? Math.log10(Math.max(v, 1e-30)) : v)));
+    let lo = Infinity, hi = -Infinity, absMax = 0;
+    z.forEach(v => { if (v !== null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
+    vals.forEach(v => { if (v !== null) absMax = Math.max(absMax, Math.abs(v)); });
+    let zmin, zmax;
+    if (signed) { zmin = -absMax; zmax = absMax; }
+    else if (useLog) { zmax = hi; zmin = Math.max(lo, hi - (isH ? 3 : 4)); }
+    else { zmin = 0; zmax = absMax; }
+    const dataMin = zmin, dataMax = zmax;
+    const override = window.getStoredScale ? window.getStoredScale(view) : null;
+    if (override) { zmin = override.min; zmax = override.max; }
+    const scale = signed ? 'RdBu' : (isH ? 'Viridis' : 'Hot');
+
+    // Ring shapes, merging neighbours of identical (quantized) color. Within each
+    // contiguous layer the rings are painted from the outside in, each one filled all
+    // the way down to the layer's inner radius: every ring lies on top of the previous
+    // one, so there are no anti-aliasing seams between adjacent rings.
+    const shapes = [];
+    const cxm = r.cx * 1000, cym = r.cy * 1000;
+    const groups = [];
+    let grp = null;
+    r.rings.forEach((g, k) => {
+        const v = z[k];
+        if (v === null) { grp = null; return; }
+        const color = colorAt(scale, (v - zmin) / ((zmax - zmin) || 1));
+        if (!grp || Math.abs(grp.r1 - g.r0) > 1e-15) { grp = { r0: g.r0, r1: g.r1, rings: [] }; groups.push(grp); }
+        const last = grp.rings[grp.rings.length - 1];
+        if (last && last.color === color) last.r1 = g.r1;
+        else grp.rings.push({ r0: g.r0, r1: g.r1, color });
+        grp.r1 = g.r1;
+    });
+    for (const gp of groups) {
+        for (let k = gp.rings.length - 1; k >= 0; k--) {
+            const rg = gp.rings[k];
+            shapes.push({ type: 'path', path: svgRingPath(cxm, cym, gp.r0 * 1000, rg.r1 * 1000, 360),
+                fillcolor: rg.color, fillrule: 'evenodd', line: { width: 0, color: 'rgba(0,0,0,0)' }, layer: 'between' });
+        }
+    }
+    // H field lines: concentric circles at evenly spaced values of A ∝ ln(b/r).
+    if (isH && nFieldLines > 0) {
+        for (let k = 1; k <= nFieldLines; k++) {
+            const rr = r.b * Math.pow(r.a / r.b, k / (nFieldLines + 1)) * 1000;
+            shapes.push({ type: 'circle', xref: 'x', yref: 'y', x0: cxm - rr, y0: cym - rr, x1: cxm + rr, y1: cym + rr,
+                line: { color: 'rgba(255, 255, 255, 0.55)', width: 1 }, fillcolor: 'rgba(0,0,0,0)', layer: 'above' });
+        }
+    }
+    const unit = isH ? 'A/m' : 'A/mm²';
+    const qty = isH ? '|H|' : (signed ? 'Jz' : '|Jz|');
+    const colorbar = { title: { text: useLog ? `log₁₀ ${unit}` : unit }, len: 0.8 };
+    if (useLog) {
+        const tv = [];
+        for (let k = Math.ceil(zmin); k <= Math.floor(zmax); k++) tv.push(k);
+        if (tv.length >= 2) { colorbar.tickvals = tv; colorbar.ticktext = tv.map(k => (10 ** k).toExponential(0)); }
+    }
+    const R = (r.b + r.tShield) * 1000;
+    // Hover probes along the +x radius (one per ring), the colorbar, and the axis extent.
+    const probes = r.rings.map((g, k) => ({ x: cxm + 500 * (g.r0 + g.r1), v: vals[k] })).filter(p => p.v !== null);
+    const traces = [
+        { type: 'scatter', mode: 'markers', x: [-R, R], y: [-R, R], marker: { size: 0, opacity: 0 },
+          hoverinfo: 'skip', showlegend: false },
+        { type: 'scatter', mode: 'markers', x: probes.map(p => p.x), y: probes.map(() => cym),
+          customdata: probes.map(p => p.v), marker: { size: 6, color: 'rgba(0,0,0,0)' }, showlegend: false,
+          hovertemplate: `r: %{x:.4f} mm<br>${qty}: %{customdata:.3e} ${unit}<extra></extra>` },
+        { type: 'scatter', mode: 'markers', x: [cxm], y: [cym], hoverinfo: 'skip', showlegend: false,
+          marker: { size: 0.1, opacity: 0, color: [zmin], cmin: zmin, cmax: zmax,
+                    colorscale: COLORSCALES[scale], showscale: true, colorbar } },
+    ];
+    const at = opt.instantaneous ? `, ωt = ${opt.phaseDeg}°` : ' (peak)';
+    const title = `${qty}${at} for 1 A · ${formatFreq(r.f)} · δ = ${formatLength(r.delta)}`;
+    return { traces, shapes, zMin: zmin, zMax: zmax, dataMin, dataMax, title, xMM: [-R, R], yMM: [-R, R] };
+}
+
 // Traces for the |H| / Jz views from a field result. Returns { traces, zMin, zMax,
 // dataMin, dataMax, title }. Magnitudes are peak phasor amplitudes for a 1 A line current.
 function buildMqsTraces(r, isH, view, nFieldLines) {
@@ -344,8 +498,16 @@ function buildMqsTraces(r, isH, view, nFieldLines) {
                 if (opt.instantaneous) {
                     const hx = r.Hxr[j][i] * cp - r.Hxi[j][i] * sp;
                     const hy = r.Hyr[j][i] * cp - r.Hyi[j][i] * sp;
-                    v = Math.hypot(hx, hy);
+                    // The waveguide also has a longitudinal Hz.
+                    const hz = r.Hzr ? r.Hzr[j][i] * cp - r.Hzi[j][i] * sp : 0;
+                    v = Math.sqrt(hx * hx + hy * hy + hz * hz);
                 } else v = r.H[j][i];
+            } else if (opt.instantaneous && r.Jtr) {
+                // Waveguide wall current has a longitudinal and a perimeter component:
+                // magnitude of the instantaneous current vector.
+                const jz = r.Jr[j][i] * cp - r.Ji[j][i] * sp;
+                const jt = r.Jtr[j][i] * cp - r.Jti[j][i] * sp;
+                v = Math.hypot(jz, jt) * 1e-6;
             } else {
                 v = opt.instantaneous ? (r.Jr[j][i] * cp - r.Ji[j][i] * sp) * 1e-6 : r.J[j][i] * 1e-6;
             }
@@ -353,7 +515,7 @@ function buildMqsTraces(r, isH, view, nFieldLines) {
         }
         raw.push(row);
     }
-    const signed = !isH && opt.instantaneous;
+    const signed = !isH && opt.instantaneous && !r.Jtr;
     const useLog = opt.log && !signed;
     let z = raw;
     if (useLog) z = raw.map(row => row.map(v => (v === null ? null : Math.log10(Math.max(v, 1e-30)))));
@@ -383,7 +545,7 @@ function buildMqsTraces(r, isH, view, nFieldLines) {
     if (override) { zmin = override.min; zmax = override.max; }
 
     const unit = isH ? 'A/m' : 'A/mm²';
-    const qty = isH ? '|H|' : (signed ? 'Jz' : '|Jz|');
+    const qty = isH ? '|H|' : (signed ? 'Jz' : (r.Jtr ? '|J|' : '|Jz|'));
     const colorbar = { title: { text: useLog ? `log₁₀ ${unit}` : unit }, len: 0.8 };
     if (useLog) {
         const vals = [];
@@ -404,6 +566,12 @@ function buildMqsTraces(r, isH, view, nFieldLines) {
         colorbar,
         hovertemplate: `x: %{x:.4f} mm<br>y: %{y:.4f} mm<br>${qty}: %{customdata:.3e} ${unit}<extra></extra>`,
     }];
+    if (isH && nFieldLines > 0 && r.kind === 'wg') {
+        // Waveguide: the transverse H is not divergence-free in the cross-section (its
+        // sources are ∂Hz/∂z), so it has no potential to draw contours of. Arrows of the
+        // instantaneous transverse field instead.
+        traces.push(quiverTrace(r, cp, sp, nFieldLines));
+    }
     if (isH && nFieldLines > 0 && r.Ar) {
         // H field lines = contour lines of the instantaneous vector potential
         // Re{A·e^(jωt)} (ωt from the phase setting, 0 by default). The levels are spread
@@ -437,8 +605,9 @@ function buildMqsTraces(r, isH, view, nFieldLines) {
             });
         }
     }
-    const per = r.differential ? '1 A per trace' : '1 A';
-    const modeLabel = r.differential ? (r.mode === 'even' ? ', even mode' : ', odd mode') : '';
+    const per = r.per || (r.differential ? '1 A per trace' : '1 A');
+    const modeLabel = r.differential ? (r.mode === 'even' ? ', even mode' : ', odd mode')
+        : (r.kind === 'wg' ? `, ${r.mode}` : '');
     const at = opt.instantaneous ? `, ωt = ${opt.phaseDeg}°` : ' (peak)';
     const title = `${qty}${at} for ${per}${modeLabel} · ${formatFreq(r.f)} · δ = ${formatLength(r.delta)}`;
     return { traces, zMin: zmin, zMax: zmax, dataMin, dataMax, title, xMM, yMM };
@@ -681,13 +850,16 @@ function draw(resetZoom = false) {
             // Field lines in the H view: the Streamlines count, 20 when left empty
             // (an explicit 0 turns them off).
             const slRaw = (document.getElementById('plot-streamlines')?.value || '').trim();
-            mqsView = buildMqsTraces(mqsField, isH, currentView,
-                slRaw === '' ? 20 : Math.max(0, parseInt(slRaw) || 0));
+            const nLines = slRaw === '' ? 20 : Math.max(0, parseInt(slRaw) || 0);
+            mqsView = mqsField.kind === 'radial'
+                ? buildCoaxTraces(mqsField, isH, currentView, nLines)
+                : buildMqsTraces(mqsField, isH, currentView, nLines);
             title = mqsView.title;
             xMM = mqsView.xMM; yMM = mqsView.yMM;
             zMin = mqsView.zMin; zMax = mqsView.zMax;
             actualDataMin = mqsView.dataMin; actualDataMax = mqsView.dataMax;
         }
+        if (mqsView && mqsView.shapes) shapes.push(...mqsView.shapes);
         shapes.push(...outlineShapes(solver, maxY));
     }
 
@@ -915,11 +1087,10 @@ function draw(resetZoom = false) {
                     viewButtons.push({ label: "Potential", method: "skip", args: [] });
                 }
                 viewButtons.push({ label: "|E| Field", method: "skip", args: [] });
-                // H field and current density (eddy-current solve, on demand).
-                if (solver.has_potential !== false) {
-                    viewButtons.push({ label: "|H| Field", method: "skip", args: [] });
-                    viewButtons.push({ label: "Current J", method: "skip", args: [] });
-                }
+                // H field and current density (on demand: eddy-current solve, or the
+                // closed form for coax and waveguide).
+                viewButtons.push({ label: "|H| Field", method: "skip", args: [] });
+                viewButtons.push({ label: "Current J", method: "skip", args: [] });
             }
             // Both the highlighted button and the click handler key off the LABEL, never a
             // fixed index, with Potential absent, "|E| Field" is at index 1, not 2.

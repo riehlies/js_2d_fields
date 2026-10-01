@@ -31,6 +31,20 @@ Full-wave solver already runs for the conductor loss. Selecting one of the
 views runs one extra MQS solve at the chosen frequency on the last
 simulation's mesh. The loss, RLGC and S-parameter results are unchanged.
 
+**Coax and rectangular waveguide** (added 2026-10-01, second step) use the
+exact closed-form fields instead, since both are exact shapes with a
+homogeneous fill:
+
+- Coax: Bessel-function skin effect in the inner conductor,
+  H<sub>φ</sub> = I/(2πr) in the dielectric, exponential decay into the
+  shield. Drawn as concentric rings, so thin skin layers stay round at any zoom.
+  Field lines are circles at evenly spaced values of A ∝ ln(b/r).
+- Waveguide: fundamental mode (TE10, or TE01 for a guide taller than wide),
+  normalized to **1 W** transmitted power. |H| includes the longitudinal
+  H<sub>z</sub>; the field lines are arrows of the instantaneous transverse H;
+  the wall current K = n × H has a longitudinal and a perimeter component.
+  Below cutoff the request is refused (no power to normalize to).
+
 ### How the fields are computed
 
 The MQS solve works with the vector potential A<sub>z</sub> on a P2 mesh that
@@ -49,7 +63,9 @@ J(s) = K·γ·cosh(γ(d − s)) / sinh(γd), γ = (1 + j)/δ.
 
 - Full-wave solver only. The quasi-static solver does not mesh the conductor
   interiors.
-- Not available for round conductors (coax) or the rectangular waveguide.
+- The coax shield is modelled as infinitely thick, as in the solver. Its
+  profile uses the large-argument form of the exact solution (accurate for
+  δ ≪ shield radius); the net shield current is exactly −1 A either way.
 - The ground-plane current uses the 1D skin profile. That is accurate when the
   skin depth and the plane thickness are small compared to the width of the
   return current distribution (PCB copper: above a few MHz). At lower
@@ -61,22 +77,28 @@ J(s) = K·γ·cosh(γ(d − s)) / sinh(γd), γ = (1 + j)/δ.
 
 | File | Change |
 |---|---|
+| `src/tri_solver/analytic_fields.js` | **New.** Closed-form coax and waveguide fields, complex Bessel J0/J1 (scaled, overflow-free in the skin-effect regime) |
 | `src/tri_solver/mqs_field.js` | **New.** Resamples H, J and A from the MQS solution onto the plot grid, wall slab current, grid with skin-depth and face lines |
 | `src/tri_solver/mqs_loss.js` | `mqsConductorLoss(…, { returnField: true })` exports the normalized solution |
 | `src/tri_solver/tri_backend.js` | `TriBackend.mqsFieldAt(f, mode)` runs an exact MQS solve and resamples the fields |
 | `src/tri_solver/resample.js` | `buildLocator` exported |
 | `src/solve_worker.js` | New `mqsField` job, keeps the last simulation's solver |
-| `src/plot.js` | New views, H field lines, conductor outlines instead of fills in these views |
+| `src/plot.js` | New views, H field lines, coax ring renderer, waveguide H arrows, conductor outlines instead of fills in these views |
 | `src/app_solver.js` | On-demand field request, scale dialog types, plot option handlers |
 | `src/field_solver.html` | Plot options, help text, fork notice in the About tab |
 | `tests/test_mqs_field.js` | **New.** 18 checks: current normalization (exact FEM integral), Ampère's law ±1 A per trace for every MQS path (single-ended, odd/even on half and full domain, stripline), uniform current at 100 kHz, skin decay length = δ at 10 GHz, wall slab current, refusals |
-| `tests/run.mjs` | New test registered in the fast tier |
+| `tests/test_analytic_fields.js` | **New.** 12 checks: Bessel reference values, coax ±1 A and DC limit, R from the plotted coax current vs the solver's R (1 and 10 GHz), waveguide 1 W normalization, α<sub>c</sub> from the plotted wall current vs the solver's α<sub>c</sub>, below-cutoff refusal |
+| `tests/run.mjs` | New tests registered in the fast tier |
 
 ## Verification
 
 - `node tests/test_mqs_field.js`: all 18 checks pass (∮H·dl around each
   trace = 1.000 A ± 0.2 %, fitted skin decay 0.659 µm vs δ = 0.661 µm at
   10 GHz).
+- `node tests/test_analytic_fields.js`: all 12 checks pass. The R implied by
+  the plotted coax current, ∫|J|²/σ dA, matches the solver's R within 0.8 %
+  (1 and 10 GHz); the waveguide α<sub>c</sub> from the plotted wall current
+  matches the solver's α<sub>c</sub> (0.1084 dB/m for WR-90 at 10 GHz).
 - `npm run test:fast`: same result as upstream at `318300a`. The only failure,
   `complex_symmetric_test.mjs`, is a test file that is registered upstream but
   missing from the repository.

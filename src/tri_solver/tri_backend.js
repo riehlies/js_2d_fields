@@ -1,5 +1,6 @@
 // MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
-// added mqsFieldAt() for the H field / current density plot.
+// added mqsFieldAt() for the H field / current density plot (MQS export, closed
+// form for coax and rectangular waveguide).
 // See FORK_CHANGES.md for the full list of changes.
 //
 // Triangular full-wave FEM backend.
@@ -40,6 +41,17 @@ import { staticConductorLoss, solveConductorLoss, computeHtZZMetric,
 import { csqrt } from './fem_core.js';
 import { mqsConductorLoss, mqsPecInductance, refineSkinBand } from './mqs_loss.js';
 import { buildMqsGrid, resampleMqsField } from './mqs_field.js';
+import { coaxFieldAt, waveguideFieldAt } from './analytic_fields.js';
+
+// A concentric coax: one round signal conductor inside a round shield with the same
+// centre (the CoaxSolver geometry).
+function isConcentricCoax(s) {
+    const cs = s.conductors || [];
+    const inner = cs.find(c => c.is_signal && c.shape && c.shape.type === 'circle');
+    const shield = cs.find(c => !c.is_signal && c.shape && c.shape.type === 'outside_circle');
+    return !!(inner && shield && cs.length === 2 && typeof s.a === 'number' && typeof s.b === 'number'
+        && Math.abs(inner.shape.cx - shield.shape.cx) < 1e-12 && Math.abs(inner.shape.cy - shield.shape.cy) < 1e-12);
+}
 import { checkMeshQuality } from './tri_mesh.js';
 
 // Below this frequency use the static solve. Above it, the full-wave eigenmode
@@ -3006,8 +3018,12 @@ export class TriBackend {
     // loss method).
     mqsFieldAt(f, mode, opts = {}) {
         if (!this.mesh) return { ok: false, reason: 'Solve the structure first.' };
-        if (this._isWG) return { ok: false, reason: 'Not available for the rectangular waveguide (no conductor current model).' };
         if (!(f > 0)) return { ok: false, reason: 'The current distribution needs a frequency above 0 Hz.' };
+        // The concentric coax and the homogeneously filled rectangular waveguide have
+        // closed-form fields (analytic_fields.js); the MQS export below needs rectangular
+        // conductors and a quasi-TEM line.
+        if (this._isWG) return waveguideFieldAt(this.solver, f, opts);
+        if (isConcentricCoax(this.solver)) return coaxFieldAt(this.solver, f);
         if (!this.modeNames.includes(mode)) mode = this.modeNames[0];
         const prevWarnings = this._modeWarnings;
         this._modeWarnings = [];

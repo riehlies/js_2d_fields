@@ -17,7 +17,8 @@
 //      exponential skin decay across a wide face at high frequency.
 //   3. Metal walls: the absorbed ground plane carries the reconstructed slab current
 //      (opposite sign to the trace, decaying with depth); a stripline's top wall too.
-//   4. Refusals: f = 0 and shaped conductors (coax) report ok = false with a reason.
+//   4. Refusals: f = 0 reports ok = false with a reason; the coax is routed to the
+//      closed-form fields.
 import { MicrostripSolver } from '../src/microstrip.js';
 import { CoaxSolver } from '../src/coax.js';
 import { initTriBackend, TriBackend } from '../src/tri_solver/tri_backend.js';
@@ -196,14 +197,16 @@ for (const [label, triOpts] of [['half domain', {}], ['full domain, multi-drive'
     check('stripline top ground carries return current', found);
 }
 
-// ---- 4: shaped conductors are refused ----
+// ---- 4: the coax takes the closed-form path ----
 {
     const s = new CoaxSolver({ inner_diameter: 1e-3, dielectric_diameter: 3.5e-3, epsilon_r: 2.1, sigma_cond: SIGMA, freq: 1e9, mesh_backend: 'triangular' });
     const b = new TriBackend(ctx, s, { maxNodes: 12000 });
     await b.buildMesh();
     b.solveAt(1e9);
     const r = b.mqsFieldAt(1e9, b.modeNames[0]);
-    check('coax (shaped conductors) is refused with a reason', !r.ok && typeof r.reason === 'string', r.reason || '');
+    // Round conductors are outside the MQS export; the concentric coax takes the closed
+    // form instead (tests/test_analytic_fields.js checks its values).
+    check('coax takes the closed-form path', r.ok && r.kind === 'radial', r.reason || '');
 }
 
 console.log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed');

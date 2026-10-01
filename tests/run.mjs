@@ -1,5 +1,5 @@
 // MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
-// registered tests/test_mqs_field.js in the fast tier.
+// registered tests/test_mqs_field.js and tests/test_analytic_fields.js in the fast tier.
 // See FORK_CHANGES.md for the full list of changes.
 //
 // Test runner: runs every test in a tier (no early stop), prints a one-line status
@@ -57,6 +57,7 @@ const TIERS = {
         { file: 'tests/test_fullwave_edge_cases.js', cost: 13 },
         { file: 'tests/test_robustness_extremes.js', cost: 30 },
         { file: 'tests/test_mqs_field.js', cost: 26 },
+        { file: 'tests/test_analytic_fields.js', cost: 20 },
     ],
     slow: [
         { file: 'tests/test_fullwave_correctness.js', cost: 98 },
