@@ -3038,6 +3038,7 @@ export class TriBackend {
             x: Float64Array.from(r.x), y: Float64Array.from(r.y),
             H: f32(r.H), Hxr: f32(r.Hxr), Hxi: f32(r.Hxi), Hyr: f32(r.Hyr), Hyi: f32(r.Hyi),
             J: f32(r.J), Jr: f32(r.Jr), Ji: f32(r.Ji),
+            Ar: f32(r.Ar), Ai: f32(r.Ai),
             delta: Math.sqrt(2 / (2 * Math.PI * f * MU0 * req.out.sigma)),
             deltaWall: field.deltaW,
             wallPEC: { ...field.wallPEC }, wallThick: { ...field.wallThick },

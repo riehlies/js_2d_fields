@@ -241,6 +241,10 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
     const Hxr = mk(), Hxi = mk(), Hyr = mk(), Hyi = mk();
     const Jr = mk(), Ji = mk();
     const H = mk(), J = mk();
+    // Physical vector potential A = C·A1 (Wb/m). Its contour lines are the H field
+    // lines (H = curl(A ẑ)/μ0 is tangential to them); evenly spaced levels give a line
+    // density proportional to |H|. Defined on the meshed domain only.
+    const Ar = mk(), Ai = mk();
 
     for (let j = 0; j < ny; j++) {
         for (let i = 0; i < nx; i++) {
@@ -251,6 +255,7 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
             let s = 1, m = 1;
             if (parity && qx < 0) { qx = -qx; m = -1; if (parity === 'odd') s = -1; }
             let hxr = NaN, hxi = NaN, hyr = NaN, hyi = NaN, jr = NaN, ji = NaN;
+            let apr = NaN, api = NaN;
             const t = find(qx, qy);
             // A grid line lying exactly on a metal face belongs to the metal for J:
             // the default nudge picks one side, so look at the other sides too. A is
@@ -265,6 +270,7 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
             if (t >= 0) {
                 const p = evalAt(t, qx, qy);
                 ({ hxr, hxi, hyr, hyi } = hFrom(p));
+                [apr, api] = cmul(Cr, Ci, p.ar, p.ai);
                 const cls = isCondTri[tJ];
                 if (cls) {
                     const pj = tJ === t ? p : evalAt(tJ, qx, qy);
@@ -315,6 +321,7 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
                 Hxr[j][i] = Hxi[j][i] = Hyr[j][i] = Hyi[j][i] = NaN;
                 H[j][i] = NaN;
             }
+            Ar[j][i] = s * apr; Ai[j][i] = s * api;
             if (Number.isFinite(jr)) {
                 Jr[j][i] = s * jr; Ji[j][i] = s * ji;
                 J[j][i] = Math.hypot(jr, ji);
@@ -323,7 +330,7 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
             }
         }
     }
-    return { x, y, H, Hxr, Hxi, Hyr, Hyi, J, Jr, Ji };
+    return { x, y, H, Hxr, Hxi, Hyr, Hyi, J, Jr, Ji, Ar, Ai };
 }
 
 // Net current of each meshed conductor class straight from the FEM solution

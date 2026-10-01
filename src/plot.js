@@ -324,7 +324,7 @@ function outlineShapes(solver, maxY) {
 
 // Traces for the |H| / Jz views from a field result. Returns { traces, zMin, zMax,
 // dataMin, dataMax, title }. Magnitudes are peak phasor amplitudes for a 1 A line current.
-function buildMqsTraces(r, isH, view, nContours) {
+function buildMqsTraces(r, isH, view, nFieldLines) {
     const opt = getFieldDisplayOptions();
     const xMM = Array.from(r.x, v => v * 1000);
     const yMM = Array.from(r.y, v => v * 1000);
@@ -400,12 +400,38 @@ function buildMqsTraces(r, isH, view, nContours) {
         colorbar,
         hovertemplate: `x: %{x:.4f} mm<br>y: %{y:.4f} mm<br>${qty}: %{customdata:.3e} ${unit}<extra></extra>`,
     }];
-    if (isH && nContours > 0 && !opt.instantaneous) {
-        const c = efieldContourTrace(xMM, yMM, raw.map(row => row.map(v => (v === null ? 0 : v))),
-            Math.max(1e-3, 10 ** (useLog ? zmin : Math.log10(Math.max(zmax * 1e-3, 1e-3)))),
-            useLog ? 10 ** zmax : zmax, nContours);
-        c.name = 'H-field contours';
-        traces.push(c);
+    if (isH && nFieldLines > 0 && r.Ar) {
+        // H field lines = contour lines of the instantaneous vector potential
+        // Re{A·e^(jωt)} (ωt from the phase setting, 0 by default). The levels are spread
+        // evenly over the range A takes in the dielectric, so the line density is
+        // proportional to |H| and the lines close around each current. Inside the
+        // metal only the levels that A reaches there are drawn (the skin layer).
+        const A = [];
+        let aLo = Infinity, aHi = -Infinity;
+        for (let j = 0; j < ny; j++) {
+            const row = new Array(nx);
+            for (let i = 0; i < nx; i++) {
+                const v = r.Ar[j][i] * cp - r.Ai[j][i] * sp;
+                if (!Number.isFinite(v)) { row[i] = null; continue; }
+                row[i] = v;
+                if (!Number.isFinite(r.J[j][i])) {   // dielectric point
+                    if (v < aLo) aLo = v;
+                    if (v > aHi) aHi = v;
+                }
+            }
+            A.push(row);
+        }
+        if (aHi > aLo) {
+            const step = (aHi - aLo) / (nFieldLines + 1);
+            traces.push({
+                type: 'contour', x: xMM, y: yMM, z: A,
+                contours: { coloring: 'none', showlines: true,
+                    start: aLo + step, end: aHi - step * 0.999, size: step },
+                line: { smoothing: 1.0, width: 1, color: 'rgba(255, 255, 255, 0.55)' },
+                showscale: false, hoverinfo: 'skip',
+                name: 'H field lines',
+            });
+        }
     }
     const per = r.differential ? '1 A per trace' : '1 A';
     const modeLabel = r.differential ? (r.mode === 'even' ? ', even mode' : ', odd mode') : '';
@@ -648,7 +674,11 @@ function draw(resetZoom = false) {
         } else if (!mqsField.ok) {
             title = `${isH ? 'H field' : 'Current density'} not available (see log)`;
         } else {
-            mqsView = buildMqsTraces(mqsField, isH, currentView, plotOptions.contours);
+            // Field lines in the H view: the Streamlines count, 20 when left empty
+            // (an explicit 0 turns them off).
+            const slRaw = (document.getElementById('plot-streamlines')?.value || '').trim();
+            mqsView = buildMqsTraces(mqsField, isH, currentView,
+                slRaw === '' ? 20 : Math.max(0, parseInt(slRaw) || 0));
             title = mqsView.title;
             xMM = mqsView.xMM; yMM = mqsView.yMM;
             zMin = mqsView.zMin; zMax = mqsView.zMax;
