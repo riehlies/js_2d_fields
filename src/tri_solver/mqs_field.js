@@ -1,3 +1,9 @@
+// Copyright (C) 2026 David Riehl
+// Part of a modified version (fork) of js_2d_fields by Henrik Forstén,
+// https://github.com/Ttl/js_2d_fields. This file is new in the fork and is licensed
+// under the GNU General Public License v3, like the rest of the project (see
+// LICENSE). See FORK_CHANGES.md for the list of changes.
+//
 // Magnetic field and conductor current density from the MQS eddy-current solve,
 // resampled onto a rectilinear plot grid.
 //

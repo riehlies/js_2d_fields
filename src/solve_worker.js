@@ -1,3 +1,7 @@
+// MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
+// added the 'mqsField' job (H field / current density of the last simulation).
+// See FORK_CHANGES.md for the full list of changes.
+//
 // Solve worker.
 //
 // Every solve needs multiple synchronous WASM calls, and a single one of them

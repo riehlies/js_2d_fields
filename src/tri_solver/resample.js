@@ -1,3 +1,7 @@
+// MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
+// buildLocator is exported (used by mqs_field.js).
+// See FORK_CHANGES.md for the full list of changes.
+//
 // Resample a triangular-mesh static FEM solution (P2 scalar potential) onto a
 // regular grid, producing the SAME { x, y, V[ny][nx], Ex[ny][nx], Ey[ny][nx] }
 // shape the rectilinear FDM solver exposes — so plot.js (heatmap/contour) and

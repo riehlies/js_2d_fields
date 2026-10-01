@@ -1,3 +1,7 @@
+// MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
+// added the |H| Field and Current J views (buildMqsTraces, H field lines, outline shapes).
+// See FORK_CHANGES.md for the full list of changes.
+
 import { makeStreamlineTraceFromConductors } from './streamlines.js';
 import { computeSParamsSingleEnded, computeSParamsDiffAuto, sParamTodB,
          isSelfReferenced, sparamsForPoint, usableSweepPoints } from './sparameters.js';

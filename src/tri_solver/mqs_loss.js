@@ -1,3 +1,7 @@
+// MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
+// mqsConductorLoss can export its solution for plotting (opts.returnField).
+// See FORK_CHANGES.md for the full list of changes.
+//
 // Magneto-quasi-static (MQS) volume eddy-current conductor loss.
 //
 // Solves the 2D skin-effect problem with the conductor interior meshed at finite σ

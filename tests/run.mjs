@@ -1,3 +1,7 @@
+// MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
+// registered tests/test_mqs_field.js in the fast tier.
+// See FORK_CHANGES.md for the full list of changes.
+//
 // Test runner: runs every test in a tier (no early stop), prints a one-line status
 // per test, shows the output of failing tests only, and exits nonzero if any failed.
 //

@@ -1,3 +1,7 @@
+// MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
+// added mqsFieldAt() for the H field / current density plot.
+// See FORK_CHANGES.md for the full list of changes.
+//
 // Triangular full-wave FEM backend.
 //
 // Consumes the SAME backend-neutral geometry the rectilinear FDM solver uses

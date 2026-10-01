@@ -1,5 +1,13 @@
 # 2D Transmission Line Field Solver
 
+> **Fork notice.** This is a modified version of
+> [js_2d_fields](https://github.com/Ttl/js_2d_fields) by Henrik Forstén.
+> It adds **|H| Field** and **Current J** views (magnetic field, field lines and
+> conductor current density from the eddy-current solve). Changes by David
+> Riehl, 2026-10-01, see [FORK_CHANGES.md](FORK_CHANGES.md). Licensed under the
+> GNU GPL v3 like the original. The online version linked below is the
+> original, without these changes.
+
 ![Header](https://github.com/Ttl/js_2d_fields/blob/master/docs/header.png?raw=true)
 
 A browser-based quasi-static and full-wave 2D field solver for transmission line analysis. Computes characteristic impedance, effective permittivity, RLGC parameters, losses, and S-parameters.
@@ -13,7 +21,7 @@ Try it online: https://hforsten.com/field_solver.html
 - Full RLGC Extraction: Resistance, inductance, capacitance, conductance per unit length
 - Loss Modeling: Conductor losses (skin effect, surface roughness) and dielectric losses
 - S-Parameter Export: Touchstone .s2p and .s4p file generation
-- Visualization: 2D potential plots, E-field streamlines, frequency-dependent plots
+- Visualization: 2D potential plots, E-field streamlines, H field with field lines and conductor current density (fork), frequency-dependent plots
 - Adaptive Meshing: Automatic mesh refinement for accurate field solutions
 
 ## Quick Start
