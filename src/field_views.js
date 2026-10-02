@@ -1022,7 +1022,10 @@ function addHalos(traces) {
         const light = m && (Number(m[0]) + Number(m[1]) + Number(m[2])) / 3 > 170 && !/arrows/.test(t.name || '')
             && !t.line.dash;
         if (light) {
+            // Same legend group as its line: a click in the legend hides both.
+            if (t.name && !t.legendgroup) t.legendgroup = t.name;
             out.push({ type: 'scatter', mode: 'lines', x: t.x, y: t.y, hoverinfo: 'skip', showlegend: false,
+                       legendgroup: t.legendgroup,
                        line: { color: 'rgba(0, 0, 0, 0.3)', width: (t.line.width || 1) + 1.0 } });
         }
         out.push(t);

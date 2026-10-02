@@ -500,6 +500,22 @@ function updateArrows() {
                                     'marker.symbol': [(d.S && d.S.symbol) || 'circle-open-dot'] }, [sIdx]);
     }
 }
+// Legend state: which line sets the user has shown or hidden by clicking the legend,
+// kept across redraws and views (Plotly.react would reset it). Keyed by legend group, or
+// the trace name. Equipotentials and the power-containment lines start hidden: they
+// are shown on request.
+const legendVisibility = {};
+const hiddenByDefault = (key) => key === 'Equipotentials' || /% of the power$/.test(key);
+const legendKey = (t) => t.legendgroup || (t.showlegend ? t.name : null);
+function applyLegendVisibility(traces) {
+    for (const t of traces) {
+        const key = legendKey(t);
+        if (!key) continue;
+        const v = key in legendVisibility ? legendVisibility[key] : (hiddenByDefault(key) ? 'legendonly' : true);
+        if (v !== true) t.visible = v;
+    }
+}
+
 // Menu row with fixed gaps in pixels: Plotly places menus at fractions of the plot
 // width, so fixed fractions spread them apart in a wide window. Measures the drawn
 // menus and moves them next to each other (the odd / even mode after a wider gap).
@@ -827,8 +843,24 @@ function draw(resetZoom = false) {
         ]
     };
 
+    applyLegendVisibility(traces);
     Plotly.react(container, traces, layout, config);
     packMenus(container);
+    if (!container._legendListenerBound) {
+        // Legend clicks restyle `visible`: remember the new state per legend group.
+        container.on('plotly_restyle', (ev) => {
+            const [upd, idx] = ev || [];
+            if (!upd || !('visible' in upd) || !Array.isArray(idx)) return;
+            idx.forEach((k, i) => {
+                const t = container.data[k];
+                const key = t && (t.legendgroup || t.name);
+                if (!key) return;
+                const v = Array.isArray(upd.visible) ? upd.visible[i % upd.visible.length] : upd.visible;
+                legendVisibility[key] = v === undefined ? true : v;
+            });
+        });
+        container._legendListenerBound = true;
+    }
     if (!window._packMenusBound) {
         // The positions are fractions of the plot width: re-pack when the window resizes.
         let t = null;

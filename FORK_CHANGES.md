@@ -111,6 +111,10 @@ lines*):
 - |H|: H field lines (contours of A<sub>z</sub>), no further contour lines:
   those of a magnetic scalar potential would run along the E field lines.
   Power flow: 50 / 90 / 99 % lines. Current J and Losses: no lines.
+- Equipotentials and the power-containment lines start hidden; a click on
+  their legend entry shows them. Legend clicks switch a line set together with
+  its dark contrast seam and are kept across redraws, views and scale changes
+  (Plotly would reset them on every redraw).
 - Contour lines are computed with a marching-squares pass of our own
   (`src/isolines.js`) and drawn as line traces: a redraw takes 0.1–0.15 s
   (with Plotly contour traces 0.55–1.3 s).
