@@ -4,7 +4,9 @@
     <!-- MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
          added the |H| Field, Current J and Power flow S views (incl. coax and waveguide), the
          E / H / S field arrows, their plot options and help text, the fork and license notices
-         in the About tab, and metadata for the hosted version (advpcb.davidriehl.de/tl).
+         in the About tab, and metadata for the hosted version (advpcb.davidriehl.de/tl);
+         2026-10-02: plot options for field lines, contour lines, excitation, time display and
+         line termination with their help texts, the arrow selection moved into the plot.
          See FORK_CHANGES.md. -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -502,49 +504,93 @@
             <option value="odd">Odd</option>
             <option value="even">Even</option>
         </select>
+        <!-- Arrow selection: chosen in the menu row of the plot (state kept here) -->
+        <select id="plot-arrows" style="display: none;">
+            <option value="">Off</option>
+            <option value="E">E</option>
+            <option value="H">H</option>
+            <option value="EH">E + H</option>
+            <option value="S">S (power flow)</option>
+            <option value="EHS">E + H + S</option>
+        </select>
         <div class="control-group">
-            <label>Streamlines</label>
-            <input type="number" id="plot-streamlines" value="" step="5" min="0" placeholder="None">
+            <label>Field lines <span class="help-icon" onclick="showHelpModal('field_lines', event)">?</span></label>
+            <input type="number" id="plot-streamlines" value="20" step="5" min="0" placeholder="None">
         </div>
         <div class="control-group">
-            <label>Contours</label>
-            <input type="number" id="plot-contours" value="20" step="5" min="0" placeholder="None">
+            <label>Contour lines</label>
+            <input type="number" id="plot-contours" value="15" step="5" min="0" placeholder="None">
         </div>
         <div class="control-group">
-            <label>H / J frequency <span class="help-icon" onclick="showHelpModal('field_hj', event)">?</span></label>
-            <input type="text" class="unit-input" id="plot-field-freq" value="" placeholder="1 GHz">
-        </div>
-        <div class="control-group">
-            <label>H / J display</label>
-            <select id="plot-field-display">
-                <option value="mag">Peak magnitude</option>
-                <option value="inst">Instantaneous (ωt)</option>
+            <label>Contours show</label>
+            <select id="plot-contour-kind">
+                <option value="equi">Equipotentials</option>
+                <option value="mag">Magnitude levels (|E|, |J|)</option>
             </select>
         </div>
         <div class="control-group">
-            <label>H / J phase ωt (°)</label>
-            <input type="number" id="plot-field-phase" value="0" step="15">
+            <label>Field frequency <span class="help-icon" onclick="showHelpModal('field_hj', event)">?</span></label>
+            <input type="text" class="unit-input" id="plot-field-freq" value="" placeholder="1 GHz">
         </div>
         <div class="control-group">
-            <label>H / J color scale</label>
+            <label>Excitation <span class="help-icon" onclick="showHelpModal('field_excitation', event)">?</span></label>
+            <select id="plot-exc-kind">
+                <option value="V">Voltage per conductor</option>
+                <option value="Vd">Voltage between conductors</option>
+                <option value="I">Current per conductor</option>
+                <option value="P">Total power</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label>Value (<span id="plot-exc-unit">V</span>)</label>
+            <div style="display:flex; gap:6px;">
+                <input type="number" id="plot-exc-value" value="1" min="0" step="any" style="flex:1; min-width:0;">
+                <select id="plot-exc-rms" style="flex:1; min-width:0;">
+                    <option value="peak">Peak</option>
+                    <option value="rms">RMS</option>
+                </select>
+            </div>
+        </div>
+        <div class="control-group">
+            <label>Time display <span class="help-icon" onclick="showHelpModal('field_time', event)">?</span></label>
+            <select id="plot-field-display">
+                <option value="mag">Peak amplitude</option>
+                <option value="inst">Instantaneous at ωt</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label>Phase ωt (°)</label>
+            <div style="display:flex; gap:6px;">
+                <input type="number" id="plot-field-phase" value="0" step="15" style="flex:1; min-width:0;">
+                <button type="button" id="plot-field-play" title="Run through ωt" style="flex:0 0 44px; width:44px; padding:2px 0; margin:0;">&#9654;</button>
+            </div>
+        </div>
+        <div class="control-group">
+            <label>Line termination <span class="help-icon" onclick="showHelpModal('field_standing', event)">?</span></label>
+            <select id="plot-sw-load">
+                <option value="matched">Matched (travelling wave)</option>
+                <option value="open">Open end</option>
+                <option value="short">Short circuit</option>
+                <option value="custom">Load Z_L</option>
+            </select>
+        </div>
+        <div class="control-group" id="plot-sw-zl-group" style="display:none;">
+            <label>Z_L (Ω, e.g. 100 or 25+10j)</label>
+            <input type="text" id="plot-sw-zl" value="100">
+        </div>
+        <div class="control-group" id="plot-sw-pos-group" style="display:none;">
+            <label>Distance from the load (λ)</label>
+            <input type="number" id="plot-sw-pos" value="0.125" min="0" max="1" step="0.025">
+        </div>
+        <div class="control-group">
+            <label>Color scale (H, J, S)</label>
             <select id="plot-field-scale">
                 <option value="log">Logarithmic</option>
                 <option value="linear">Linear</option>
             </select>
         </div>
         <div class="control-group">
-            <label>Field arrows <span class="help-icon" onclick="showHelpModal('field_arrows', event)">?</span></label>
-            <select id="plot-arrows">
-                <option value="">Off</option>
-                <option value="E">E</option>
-                <option value="H">H</option>
-                <option value="EH">E + H</option>
-                <option value="S">S (power flow)</option>
-                <option value="EHS">E + H + S</option>
-            </select>
-        </div>
-        <div class="control-group">
-            <label>Arrows across the view</label>
+            <label>Arrows across the view <span class="help-icon" onclick="showHelpModal('field_arrows', event)">?</span></label>
             <input type="number" id="plot-arrow-density" value="24" min="4" max="80" step="2">
         </div>
     </div>
@@ -739,7 +785,7 @@
         <div class="about-content">
             <h2>2D Transmission Line Field Solver</h2>
             <p>by <a href="https://hforsten.com" target="_blank">Henrik Forstén</a> | <a href="https://github.com/Ttl/js_2d_fields" target="_blank">Source code & issues</a></p>
-            <p style="padding: 8px 10px; background: #1f2d3d; border-left: 3px solid #4a9eff; border-radius: 3px;"><b>Modified version.</b> This is a modified version (fork) of the original solver by Henrik Forstén. It adds the <b>|H| Field</b>, <b>Current J</b> and <b>Power flow S</b> views and the E / H / S field arrows (magnetic field, conductor and ground current density from the eddy-current solve, closed-form fields for coax and rectangular waveguide, Poynting vector). Modifications by David Riehl, 2026. Source code of this version: <a href="https://github.com/riehlies/js_2d_fields" target="_blank">github.com/riehlies/js_2d_fields</a>, list of changes: <a href="https://github.com/riehlies/js_2d_fields/blob/master/FORK_CHANGES.md" target="_blank">FORK_CHANGES.md</a>. The original is at <a href="https://github.com/Ttl/js_2d_fields" target="_blank">github.com/Ttl/js_2d_fields</a>.</p>
+            <p style="padding: 8px 10px; background: #1f2d3d; border-left: 3px solid #4a9eff; border-radius: 3px;"><b>Modified version.</b> This is a modified version (fork) of the original solver by Henrik Forstén. It adds the <b>|H| Field</b>, <b>Current J</b> and <b>Power flow S</b> views and the E / H / S field arrows (magnetic field, conductor and ground current density from the eddy-current solve, closed-form fields for coax and rectangular waveguide, Poynting vector), electric field lines and equipotentials, one excitation (voltage, current or power) and an instantaneous time display for all field views, and standing waves on a terminated line. Modifications by David Riehl, 2026. Source code of this version: <a href="https://github.com/riehlies/js_2d_fields" target="_blank">github.com/riehlies/js_2d_fields</a>, list of changes: <a href="https://github.com/riehlies/js_2d_fields/blob/master/FORK_CHANGES.md" target="_blank">FORK_CHANGES.md</a>. The original is at <a href="https://github.com/Ttl/js_2d_fields" target="_blank">github.com/Ttl/js_2d_fields</a>.</p>
             <p style="font-size: 0.85em; color: #aaa;">Copyright &copy; Henrik Forstén (original solver), &copy; 2026 David Riehl (modifications). This program is free software: you can redistribute it and/or modify it under the terms of the <a href="LICENSE.txt" target="_blank">GNU General Public License version 3</a>. It is distributed in the hope that it will be useful, but <b>WITHOUT ANY WARRANTY</b>; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. Results are not guaranteed to be correct; verify critical designs independently. The complete corresponding source code, including the build instructions of the WebAssembly modules, is available at <a href="https://github.com/riehlies/js_2d_fields" target="_blank">github.com/riehlies/js_2d_fields</a>. Third-party components and their licenses: <a href="THIRD_PARTY_NOTICES.txt" target="_blank">THIRD_PARTY_NOTICES.txt</a>.</p>
             <p style="color: #888; font-size: 0.85em;">Version: BUILD_VERSION</p>
             <p>A quasi-static and full-wave 2D field solver for transmission line analysis with adaptive mesh refinement.</p>
@@ -1192,11 +1238,27 @@
         },
         field_arrows: {
             title: 'Field arrows',
-            body: '<p>Draws arrows of the transverse electric field (<span style="color:#4696ff">E</span>, blue), the magnetic field (<span style="color:#ff3c3c">H</span>, red) or both on top of any field view, optionally with the Poynting vector <b>S</b> = E &times; H (white &#8857;). With <b>E + H</b> you can see that the two are perpendicular everywhere: E runs from the signal conductor to the ground, H circles around the current.</p><p>The arrows show the instantaneous field at the phase <b>H / J phase &omega;t</b>, so they shrink and reverse as you step through &omega;t. Their length grows with the field strength on a logarithmic scale over two decades, because the field is singular at conductor edges and a linear scale would make almost every arrow invisible. They are re-sampled on a regular lattice whenever you zoom or pan; <b>Arrows across the view</b> sets the lattice density.</p><p>H needs the Full-wave solver (it comes from the same calculation as the |H| Field view) and is normalized like that view. E is the solver&rsquo;s field (exact closed form for coax and waveguide); its sign is chosen so that power flows in +z. Inside conductors E is practically zero, so only H arrows appear there. In the waveguide the arrows show the transverse fields; the longitudinal H<sub>z</sub> points out of the plane.</p><p><b>S (power flow)</b>: the time-average Poynting vector &frac12;Re(E &times; H*) points along the line, out of the page (&#8857;, the tip of an arrow coming towards you), because E and H are perpendicular and both lie in the cross-section. The symbol size grows with the power density. The <b>Power flow S</b> view shows the same quantity as a color map.</p>'
+            body: '<p>Choose the arrows in the menu row of the plot, next to the view selector: arrows of the transverse electric field (<span style="color:#4696ff">E</span>, blue), the magnetic field (<span style="color:#ff3c3c">H</span>, red) or both, optionally with the Poynting vector <b>S</b> (white). With <b>E + H</b> you can see that the two are perpendicular everywhere: E runs from the signal conductor to the ground, H circles around the current. H and S need the Full-wave solver.</p><p>The arrows follow the <b>Time display</b>: the instantaneous field at phase &omega;t (they shrink and reverse as &omega;t runs), or with <b>Peak amplitude</b> each field at the phase of its own maximum. Their length grows with the field strength on a logarithmic scale over two decades, because the field is singular at conductor edges and a linear scale would make almost every arrow invisible. They are re-sampled on a regular lattice whenever you zoom or pan; <b>Arrows across the view</b> sets the lattice density. Inside conductors E is practically zero, so only H arrows appear there.</p><p><b>S</b> points along the line: &#8857; is power flowing out of the page (towards you), &#8855; into the page (only in a standing wave, where the instantaneous power flow reverses). The symbol size grows with the power density: the time average with <b>Peak amplitude</b>, the instantaneous value at &omega;t otherwise.</p>'
         },
         field_hj: {
-            title: 'H field and current density',
-            body: '<p>The <b>|H| Field</b> and <b>Current J</b> views show the magnetic field and the longitudinal current density J<sub>z</sub> at the frequency set here, for a line current of 1 A (1 A per trace for a differential pair, in the selected mode). Values are peak phasor amplitudes, or the instantaneous field at phase &omega;t.</p><p>The white lines in the |H| view are the magnetic field lines (contour lines of the vector potential A at phase &omega;t), spaced so their density is proportional to |H|. Their number is the <b>Streamlines</b> setting (20 when empty, 0 turns them off).</p><p>They come from the eddy-current (MQS) solve of the <b>Full-wave</b> solver, which meshes the conductor interiors, so skin and proximity effect are resolved inside the metal. Switching to one of these views runs one extra solve on the last simulation&rsquo;s mesh (a second or two).</p><p>Ground planes and enclosure walls are boundary conditions of that solve. Their current is reconstructed from the surface current with a 1D skin-depth profile across the plane thickness, which is accurate when the skin depth and the plane thickness are small compared to the width of the return current distribution (in practice above a few MHz for PCB copper). Plating and roughness are applied as post-processing in the loss calculation, the plotted current is that of the smooth bulk metal.</p><p><b>Coax and rectangular waveguide</b> use the exact closed-form fields of the concentric coax (Bessel-function skin effect in the inner conductor) and of the waveguide fundamental mode (TE10, or TE01 for a guide taller than wide). The waveguide is normalized to <b>1 W</b> transmitted power instead of 1 A, its H field lines are drawn as arrows of the transverse field (the longitudinal H<sub>z</sub> is included in |H|), and its wall current has a longitudinal and a perimeter component (|J| is their combined magnitude). Below cutoff the waveguide carries no power, so there is nothing to normalize to.</p><p>The <b>Power flow S</b> view shows the time-average Poynting vector S<sub>z</sub> = &frac12;Re(E &times; H*)&middot;z, the power density flowing along the line, normalized to <b>1 W</b> transmitted power (W/mm&sup2; per watt). The title shows how much of the power flows inside the dielectric; the rest flows in air, which is why &epsilon;<sub>eff</sub> of a microstrip lies between 1 and &epsilon;<sub>r</sub>.</p><p>Not available with the quasi-static solver.</p>'
+            title: 'Field frequency, H field and current density',
+            body: '<p>The <b>|H| Field</b>, <b>Current J</b> and <b>Power flow S</b> views show the magnetic field, the longitudinal current density J<sub>z</sub> and the power flow at the frequency set here. The same frequency sets the line impedance Z<sub>c</sub> that links voltage, current and power of the <b>Excitation</b> (interpolated between the solved frequency points).</p><p>H and J come from the eddy-current (MQS) solve of the <b>Full-wave</b> solver, which meshes the conductor interiors, so skin and proximity effect are resolved inside the metal. Switching to one of these views runs one extra solve on the last simulation&rsquo;s mesh (a second or two). Ground planes and enclosure walls are boundary conditions of that solve; their current is reconstructed from the surface current with a 1D skin-depth profile across the plane thickness, which is accurate when the skin depth and the plane thickness are small compared to the width of the return current distribution (in practice above a few MHz for PCB copper). Plating and roughness are applied in the loss calculation, the plotted current is that of the smooth bulk metal.</p><p><b>Coax and rectangular waveguide</b> use the exact closed-form fields of the concentric coax (Bessel-function skin effect in the inner conductor) and of the waveguide fundamental mode (TE10, or TE01 for a guide taller than wide). The waveguide H field is drawn as arrows of the transverse field (the longitudinal H<sub>z</sub> is included in |H|), and its wall current has a longitudinal and a perimeter component (|J| is their combined magnitude). Below cutoff the waveguide carries no power.</p><p>The <b>Power flow S</b> view shows S<sub>z</sub>, the power density flowing along the line: the time average &frac12;Re(E &times; H*) with <b>Peak amplitude</b>, the instantaneous E(t) &times; H(t) otherwise. The title compares the integral &int;S dA over the cross-section with the power the excitation predicts (a check of the field solution) and shows how much of the power flows inside the dielectric; the rest flows in air, which is why &epsilon;<sub>eff</sub> of a microstrip lies between 1 and &epsilon;<sub>r</sub>. The contour lines of this view enclose 50 %, 90 % and 99 % of the power.</p><p>Not available with the quasi-static solver.</p>'
+        },
+        field_lines: {
+            title: 'Field lines and contour lines',
+            body: '<p><b>Field lines</b> (number of lines):</p><ul><li>Geometry, Potential and |E| views: electric field lines. They start on the signal conductors, spaced so that every line carries the same electric flux (the same charge, D = &epsilon;E), so their density anywhere is proportional to |D|. In the odd mode a line between the two conductors is drawn once.</li><li>|H| view: magnetic field lines, the contour lines of the vector potential A<sub>z</sub> at equal steps, so their density is proportional to |B|. Coax: circles. Waveguide: arrows of the transverse H (it has no potential).</li></ul><p><b>Contour lines</b> (number of levels):</p><ul><li><b>Equipotentials</b> (dotted) in the Geometry, Potential and |E| views. They cross the field lines at right angles.</li><li><b>Magnitude levels</b>: lines of equal |E| in the |E| view (logarithmic steps) and of equal |J| in the Current J view.</li><li>Power flow view: lines enclosing 50 %, 90 % and 99 % of the transmitted power (always, when the count is not 0).</li></ul><p>With the <b>Instantaneous</b> time display the line spacing stays that of the peak field, so the lines thin out as the field passes through zero.</p>'
+        },
+        field_excitation: {
+            title: 'Excitation',
+            body: '<p>One excitation sets the scale of every field view: a voltage, a current or the transmitted power. The others follow from the line impedance Z<sub>c</sub> of the plotted mode at the <b>Field frequency</b>: V = Z<sub>c</sub>&middot;I and P = &frac12;Re(V&middot;I*) (time average, peak values). The title of each view shows all three. On a lossy line Z<sub>c</sub> is complex and the current lags or leads the voltage by its phase angle.</p><ul><li><b>Voltage per conductor</b>: the voltage of each signal conductor against ground (&plusmn;V on the two conductors of a pair in the odd mode).</li><li><b>Voltage between conductors</b>: the differential voltage of a pair in the odd mode, so each conductor carries half of it. In the even mode this falls back to the voltage per conductor.</li><li><b>Current per conductor</b>: the current of each signal conductor (the return current flows in the ground).</li><li><b>Total power</b>: the power carried by the line (both conductors of a pair).</li></ul><p>RMS values are converted to peak values (&times;&radic;2); the plots always show peak amplitudes. A rectangular waveguide has no unique voltage or current, only the power is used.</p>'
+        },
+        field_time: {
+            title: 'Time display',
+            body: '<p><b>Peak amplitude</b> shows the amplitude of every field (each at the phase of its own maximum) and the time-average power flow.</p><p><b>Instantaneous at &omega;t</b> shows the real field Re{X&middot;e<sup>j&omega;t</sup>} at the phase &omega;t, for every view, the arrows and the field lines. The color scale and the line spacing stay those of the peak, so the fields visibly shrink, reverse and the lines thin out as &omega;t runs. The &#9654; button runs through &omega;t continuously.</p><p>On a matched line (travelling wave) E and H are in phase: at a fixed position along the line both reach their maximum at the same time and both are zero at &omega;t = 90&deg;. The energy does not swing between the electric and the magnetic field, it travels with the wave. E and H alternate only in a standing wave, see <b>Line termination</b>.</p>'
+        },
+        field_standing: {
+            title: 'Line termination (standing wave)',
+            body: '<p>With a termination other than matched the line carries the incident wave of the <b>Excitation</b> and its reflection &Gamma; = (Z<sub>L</sub> &minus; Z<sub>c</sub>)/(Z<sub>L</sub> + Z<sub>c</sub>) from the load. The cross-section is shown at the distance d from the load (in wavelengths): V(d) = V<sup>+</sup>(1 + &Gamma;e<sup>&minus;j4&pi;d/&lambda;</sup>), I(d) = I<sup>+</sup>(1 &minus; &Gamma;e<sup>&minus;j4&pi;d/&lambda;</sup>). The shape of the fields does not change, only the amplitudes and phases of E and H.</p><p>Example, open end: at d = 0 the voltage doubles and the current is zero (only E). At d = &lambda;/4 it is the other way round (only H). At d = &lambda;/8 V and I are 90&deg; apart: with the <b>Instantaneous</b> time display E and H alternate, one is at its maximum when the other is zero, and the instantaneous power flow reverses twice per period while its time average is zero.</p><p>Attenuation along the line is neglected over the distance d. Not available for the waveguide.</p>'
         }
     };
 

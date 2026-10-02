@@ -1,13 +1,17 @@
-// MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
-// added the |H| Field and Current J views (buildMqsTraces, buildCoaxTraces, H field lines,
-// waveguide H arrows, outline shapes), E / H field arrows on every field view and the
-// Poynting vector (power flow view and ⊙ markers).
+// MODIFIED 2026-10-01/02 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
+// added the |H| Field, Current J and Power flow S views, E / H / S arrows (now chosen in a
+// menu of the plot), one excitation (voltage, current or power) and one time display for
+// all field views, standing waves, field lines and equipotentials on the field views.
+// The view builders live in field_views.js.
 // See FORK_CHANGES.md for the full list of changes.
 
-import { makeStreamlineTraceFromConductors } from './streamlines.js';
 import { computeSParamsSingleEnded, computeSParamsDiffAuto, sParamTodB,
          isSelfReferenced, sparamsForPoint, usableSweepPoints } from './sparameters.js';
-import { isComplement, svgRingPath, shapeContains } from './shapes.js';
+import { isComplement, svgRingPath } from './shapes.js';
+import { buildFieldView, geometryLines, buildArrowData, formatFreq, isWaveguide,
+         dielectricAt } from './field_views.js';
+import { excitation, reflection, standingWave, parseImpedance, formatSI, formatPhasor,
+         c, cmul, cconj, cabs } from './field_excitation.js';
 
 // Lazy Plotly access - allows app to function while Plotly is loading
 const getPlotly = () => window.Plotly;
@@ -52,14 +56,6 @@ const get = {
     inputValue: (id) => getInputValue(id)
 };
 
-function contourScaledB(min, max, n) {
-    let eMin = Math.max(Math.max(1, max*1e-2), min);
-    eMin = Math.log10(Math.max(eMin, 0.1));
-    let eMax = Math.log10(Math.max(eMin + 0.1, Math.max(max, 0.1)));
-    eMax = Math.max(eMin + 0.1, eMax);
-    const logStep = n === 0 ? 1 : Math.abs((eMax - eMin)) / n;
-    return [eMin, eMax, logStep];
-}
 
 // Closed rectangular loop as an SVG path, in mm. Two of these in one path with the evenodd
 // fill rule give a rectangular ring, the frame drawn around an enclosed medium's domain.
@@ -234,34 +230,17 @@ function computeGeometryView(solver, maxY, fraction = SIGNAL_CONDUCTOR_VIEW_FRAC
     return { xRange, yRange };
 }
 
-// The log-spaced |E| contour-LINE trace (lines only, no fill), shared by the geometry overlay and
-// the |E| field view so their contours are identical. z = log10(|E|) with log-spaced levels keeps
-// the lines evenly spaced instead of crowding at the singular trace corners. Named "E-field
-// contours" so setScaleRange can rescale it live in either view.
-function efieldContourTrace(xMM, yMM, zData, eMin, eMax, n) {
-    const limits = contourScaledB(eMin, eMax, n);
-    return {
-        type: "contour",
-        x: xMM, y: yMM,
-        z: zData.map(row => row.map(v => Math.log10(Math.max(v, 1e-3)))),
-        contours: { showlines: true, coloring: "none", start: limits[0], end: limits[1], size: limits[2] },
-        line: { smoothing: 1.3, width: 1, color: "rgba(0, 0, 0, 0.4)" },
-        showscale: false,
-        name: "E-field contours",
-        hoverinfo: "skip"
-    };
-}
-
 // Export functions to get/set scale range for current view
 function getScaleRange() {
     return { min: zMin, max: zMax, view: currentView };
 }
 
-// ---- H field / current density views ------------------------------------------------
+// ---- H field / current density data --------------------------------------------------
 // The data comes from an extra eddy-current solve in the worker (TriBackend.mqsFieldAt),
-// requested on demand through window.requestMqsField when one of these views is shown.
-// Each result is tagged with the key it was requested for (solve generation, mode,
-// frequency), a view whose key does not match asks again.
+// or the closed form for coax and waveguide, requested on demand through
+// window.requestMqsField when a view or the arrows need it. Each result is tagged with
+// the key it was requested for (solve generation, mode, frequency), a view whose key
+// does not match asks again.
 let mqsField = null;
 let mqsPending = null;
 let mqsGen = 0;
@@ -291,27 +270,140 @@ function setMqsField(data, key) {
     if (mqsPending === key) mqsPending = null;
 }
 
-function getFieldDisplayOptions() {
-    const disp = document.getElementById('plot-field-display');
-    const scale = document.getElementById('plot-field-scale');
-    const phase = parseFloat(document.getElementById('plot-field-phase')?.value);
+// The H / J field for the current mode and frequency, requested if missing.
+function ensureMqsField() {
+    const key = mqsKey();
+    if (mqsField && mqsField.key === key) return mqsField.ok ? mqsField : null;
+    if (mqsPending !== key && window.requestMqsField) {
+        mqsPending = key;
+        window.requestMqsField(mqsModeIndex(), fieldPlotFreq(), key);
+    }
+    return null;
+}
+
+// H / J data available for the current settings (without requesting it).
+function currentMqsField() {
+    return (mqsField && mqsField.key === mqsKey() && mqsField.ok) ? mqsField : null;
+}
+
+// H, J and S need the eddy-current solve of the Full-wave solver.
+function hasHField(solver) {
+    return !!solver && solver.mesh_backend === 'triangular';
+}
+
+// ---- sidebar settings of the field views ---------------------------------------------
+const elVal = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
+
+function readFieldOptions() {
+    const phase = parseFloat(elVal('plot-field-phase'));
+    const phaseDeg = Number.isFinite(phase) ? phase : 0;
+    const count = (id, dflt) => {
+        const raw = String(elVal(id)).trim();
+        if (raw === '') return dflt;
+        const n = parseInt(raw);
+        return Number.isFinite(n) && n > 0 ? Math.min(n, 200) : 0;
+    };
     return {
-        instantaneous: disp ? disp.value === 'inst' : false,
-        phaseDeg: Number.isFinite(phase) ? phase : 0,
-        log: scale ? scale.value !== 'linear' : true,
+        inst: elVal('plot-field-display') === 'inst',
+        phaseDeg,
+        wt: phaseDeg * Math.PI / 180,
+        log: elVal('plot-field-scale') !== 'linear',
+        nLines: count('plot-streamlines', 0),
+        nContours: count('plot-contours', 0),
+        contourKind: elVal('plot-contour-kind') === 'mag' ? 'mag' : 'equi',
     };
 }
 
-function formatFreq(f) {
-    if (f >= 1e9) return `${+(f / 1e9).toPrecision(4)} GHz`;
-    if (f >= 1e6) return `${+(f / 1e6).toPrecision(4)} MHz`;
-    if (f >= 1e3) return `${+(f / 1e3).toPrecision(4)} kHz`;
-    return `${+f.toPrecision(4)} Hz`;
+// Line impedance of the plotted mode at the field frequency, interpolated in the sweep.
+function zcAt(results, freq, modeIdx) {
+    if (!results || !results.length) return null;
+    const zOf = (r) => {
+        const modes = r.result && r.result.modes;
+        if (!modes || !modes.length) return null;
+        const m = modes[modeIdx] || modes[0];
+        if (m.Zc && Number.isFinite(m.Zc.re) && Number.isFinite(m.Zc.im)) return c(m.Zc.re, m.Zc.im);
+        return Number.isFinite(m.Z0) ? c(m.Z0, 0) : null;
+    };
+    const pts = results.map(r => ({ f: r.freq, z: zOf(r) })).filter(p => p.z).sort((a, b) => a.f - b.f);
+    if (!pts.length) return null;
+    if (freq <= pts[0].f) return pts[0].z;
+    if (freq >= pts[pts.length - 1].f) return pts[pts.length - 1].z;
+    let k = 1;
+    while (k < pts.length - 1 && pts[k].f < freq) k++;
+    const a = pts[k - 1], b = pts[k], t = (freq - a.f) / ((b.f - a.f) || 1);
+    return c(a.z.re + t * (b.z.re - a.z.re), a.z.im + t * (b.z.im - a.z.im));
 }
 
-function formatLength(m) {
-    if (m >= 1e-3) return `${+(m * 1e3).toPrecision(3)} mm`;
-    return `${+(m * 1e6).toPrecision(3)} µm`;
+const LOAD_NAMES = { open: 'open end', short: 'short circuit', custom: 'load' };
+
+// Excitation of the field views: amplitudes cE, cH of the plotted position, the expected
+// power and the label for the title.
+function readExcitation(solver) {
+    const diff = isDifferentialMode();
+    const modeIdx = mqsModeIndex();
+    const mode = diff ? (modeIdx === 0 ? 'odd' : 'even') : 'single';
+    const wg = isWaveguide(solver);
+    const freq = fieldPlotFreq();
+    const Zc = wg ? null : zcAt(get.frequencySweepResults(), freq, modeIdx);
+    const kind = elVal('plot-exc-kind') || 'V';
+    const value = parseFloat(elVal('plot-exc-value'));
+    const rms = elVal('plot-exc-rms') === 'rms';
+    const nCond = diff ? 2 : 1;
+    const base = excitation({ kind, value, rms, Zc, nCond, mode, waveguide: wg });
+    if (!base.ok) return { ...base, cE: c(1), cH: c(0), label: base.note };
+    const ex = { ...base, nCond, mode, Zc };
+    // Termination: standing wave at d/λ from the load (TEM lines only).
+    const load = elVal('plot-sw-load') || 'matched';
+    const dl = parseFloat(elVal('plot-sw-pos'));
+    ex.standing = false;
+    if (!wg && load !== 'matched') {
+        const ZL = parseImpedance(elVal('plot-sw-zl'));
+        if (load === 'custom' && !ZL) ex.note = 'The load impedance could not be read, the line is drawn matched.';
+        else {
+            const gamma = reflection(load, Zc, ZL);
+            const sw = standingWave(base.V, base.I, gamma, Number.isFinite(dl) ? dl : 0);
+            ex.cE = sw.V; ex.cH = sw.I;
+            ex.standing = { load, gamma, dl: Number.isFinite(dl) ? dl : 0, ZL };
+        }
+    }
+    ex.Pexp = nCond * 0.5 * cmul(ex.cE, cconj(ex.cH)).re;
+    if (wg) ex.Pexp = base.P;
+    ex.label = excitationLabel(ex, rms, kind);
+    return ex;
+}
+
+function excitationLabel(ex, rms, kind) {
+    const pk = (rms && kind !== 'P') ? ' (peak values)' : '';
+    if (ex.waveguide) return `P = ${formatSI(ex.P, 'W')}${ex.note ? ' · ' + ex.note : ''}`;
+    const V = ex.cE, I = ex.cH;
+    let s;
+    if (ex.mode === 'odd') s = `±${formatPhasor(V, 'V')} per conductor (${formatSI(2 * cabs(V), 'V')} differential), ±${formatPhasor(I, 'A')}`;
+    else if (ex.mode === 'even') s = `${formatPhasor(V, 'V')} on both conductors, ${formatPhasor(I, 'A')} each`;
+    else s = `V = ${formatPhasor(V, 'V')}, I = ${formatPhasor(I, 'A')}`;
+    if (ex.standing) {
+        const sw = ex.standing;
+        const name = sw.load === 'custom' ? `Z_L = ${formatPhasor(sw.ZL, 'Ω')}` : LOAD_NAMES[sw.load];
+        s = `${name}, ${+sw.dl.toFixed(4)} λ from it: ${s} · incident P = ${formatSI(ex.P, 'W')}`;
+    } else {
+        s += `, P = ${formatSI(ex.P, 'W')}`;
+    }
+    return s + pk + (ex.note ? ' · ' + ex.note : '');
+}
+
+// Everything a field view builder needs (see field_views.js).
+function buildEnv(solver, view, f) {
+    const opt = readFieldOptions();
+    const ex = readExcitation(solver);
+    const fields = getFields();
+    return {
+        solver, view, f, ex, opt,
+        freq: fieldPlotFreq(),
+        E: { Ex: fields.Ex, Ey: fields.Ey },
+        V: getPotential(),
+        epsAt: (x, y) => dielectricAt(solver, x, y),
+        stored: (v) => (window.getStoredScale ? window.getStoredScale(v) : null),
+        arrowsH: getArrowOptions().H,
+    };
 }
 
 // Conductor and dielectric outlines only. The H and J views show the field inside the
@@ -328,251 +420,28 @@ function outlineShapes(solver, maxY) {
     return [...diel, ...cond];
 }
 
-// Colorbar ticks for a log10 color axis: decades, or 1-2-5 steps when the range spans
-// less than two decades, labelled with the actual values.
-function logTicks(zmin, zmax) {
-    let vals = [];
-    for (let k = Math.ceil(zmin); k <= Math.floor(zmax); k++) vals.push(k);
-    if (vals.length < 2) {
-        vals = [];
-        for (let k = Math.floor(zmin) - 1; k <= Math.ceil(zmax); k++)
-            for (const m of [1, 2, 5]) { const v = k + Math.log10(m); if (v >= zmin && v <= zmax) vals.push(v); }
-    }
-    if (vals.length < 2) return {};
-    return { tickvals: vals, ticktext: vals.map(v => (10 ** v).toPrecision(1).replace(/\.0+e/, 'e')) };
-}
-
-// ---- shared color scales (Plotly's definitions), used where colors are computed here ----
-const COLORSCALES = {
-    Viridis: [[0, '#440154'], [0.0627, '#48186a'], [0.1255, '#472d7b'], [0.1882, '#424086'],
-        [0.2510, '#3b528b'], [0.3137, '#33638d'], [0.3765, '#2c728e'], [0.4392, '#26828e'],
-        [0.5020, '#21918c'], [0.5647, '#1fa088'], [0.6275, '#28ae80'], [0.6902, '#3fbc73'],
-        [0.7529, '#5ec962'], [0.8157, '#84d44b'], [0.8784, '#addc30'], [0.9412, '#d8e219'], [1, '#fde725']],
-    Hot: [[0, 'rgb(0,0,0)'], [0.3, 'rgb(230,0,0)'], [0.6, 'rgb(255,210,0)'], [1, 'rgb(255,255,255)']],
-    Electric: [[0, 'rgb(0,0,0)'], [0.15, 'rgb(30,0,100)'], [0.4, 'rgb(120,0,100)'], [0.6, 'rgb(160,90,0)'],
-        [0.8, 'rgb(230,200,0)'], [1, 'rgb(255,250,220)']],
-    RdBu: [[0, 'rgb(5,10,172)'], [0.35, 'rgb(106,137,247)'], [0.5, 'rgb(190,190,190)'],
-        [0.6, 'rgb(220,170,132)'], [0.7, 'rgb(230,145,90)'], [1, 'rgb(178,10,28)']],
-};
-function parseColor(c) {
-    if (c[0] === '#') return [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16));
-    return c.match(/\d+/g).slice(0, 3).map(Number);
-}
-// Color of t ∈ [0, 1] on a scale, quantized to 256 levels (adjacent equal colors merge).
-function colorAt(scale, t) {
-    const st = COLORSCALES[scale];
-    t = Math.round(Math.min(1, Math.max(0, t)) * 255) / 255;
-    for (let i = 1; i < st.length; i++) {
-        if (t <= st[i][0]) {
-            const f = (t - st[i - 1][0]) / (st[i][0] - st[i - 1][0] || 1);
-            const a = parseColor(st[i - 1][1]), b = parseColor(st[i][1]);
-            return `rgb(${a.map((v, k) => Math.round(v + f * (b[k] - v))).join(',')})`;
-        }
-    }
-    return st[st.length - 1][1];
-}
-
-// Arrows of the instantaneous transverse H on a coarse grid (waveguide).
-function quiverTrace(r, cp, sp, n) {
-    let xlo = Infinity, xhi = -Infinity, ylo = Infinity, yhi = -Infinity;
-    const ny = r.y.length, nx = r.x.length;
-    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-        if (!Number.isFinite(r.H[j][i]) || Number.isFinite(r.J[j][i])) continue;   // interior only
-        xlo = Math.min(xlo, r.x[i]); xhi = Math.max(xhi, r.x[i]);
-        ylo = Math.min(ylo, r.y[j]); yhi = Math.max(yhi, r.y[j]);
-    }
-    const W = xhi - xlo, Hh = yhi - ylo;
-    const nc = Math.max(4, Math.round(n * Math.sqrt(W / Hh))), nr = Math.max(3, Math.round(n * Math.sqrt(Hh / W)));
-    const nearest = (arr, v) => { let k = 0; for (let i = 1; i < arr.length; i++) if (Math.abs(arr[i] - v) < Math.abs(arr[k] - v)) k = i; return k; };
-    const pts = [];
-    let vmax = 0;
-    for (let a = 0; a < nr; a++) for (let c = 0; c < nc; c++) {
-        const x = xlo + W * (c + 0.5) / nc, y = ylo + Hh * (a + 0.5) / nr;
-        const i = nearest(r.x, x), j = nearest(r.y, y);
-        const hx = r.Hxr[j][i] * cp - r.Hxi[j][i] * sp, hy = r.Hyr[j][i] * cp - r.Hyi[j][i] * sp;
-        pts.push([x, y, hx, hy]);
-        vmax = Math.max(vmax, Math.hypot(hx, hy));
-    }
-    const X = [], Y = [];
-    const Lmax = 0.85 * Math.min(W / nc, Hh / nr);
-    for (const [x, y, hx, hy] of pts) {
-        const m = Math.hypot(hx, hy);
-        if (!(vmax > 0) || m < 0.02 * vmax) continue;
-        const L = Lmax * m / vmax, ux = hx / m, uy = hy / m;
-        const x0 = x - 0.5 * L * ux, y0 = y - 0.5 * L * uy, x1 = x + 0.5 * L * ux, y1 = y + 0.5 * L * uy;
-        const hl = 0.3 * L, c30 = Math.cos(Math.PI / 7), s30 = Math.sin(Math.PI / 7);
-        const bx = -ux, by = -uy;
-        X.push(x0, x1, null, x1, x1 + hl * (bx * c30 - by * s30), null, x1, x1 + hl * (bx * c30 + by * s30), null);
-        Y.push(y0, y1, null, y1, y1 + hl * (by * c30 + bx * s30), null, y1, y1 + hl * (by * c30 - bx * s30), null);
-    }
-    return {
-        type: 'scatter', mode: 'lines', x: X.map(v => (v === null ? null : v * 1000)),
-        y: Y.map(v => (v === null ? null : v * 1000)),
-        line: { color: 'rgba(255, 255, 255, 0.75)', width: 1.2 },
-        hoverinfo: 'skip', showlegend: false, name: 'H field arrows',
-    };
+// Conductor fills BELOW the traces (field lines and arrows stay visible on top of the
+// metal; the field heatmaps leave the metal empty) with their outline on top.
+function conductorLayerShapes(solver, maxY) {
+    const fills = conductorFillShapes(solver, maxY).map(s => ({ ...s, layer: 'between' }));
+    const outlines = conductorFillShapes(solver, maxY)
+        .filter(s => s.fillcolor !== 'rgba(0,0,0,0)')
+        .map(s => ({ ...s, fillcolor: 'rgba(0,0,0,0)', line: { color: 'rgba(0, 0, 0, 0.6)', width: 1 }, layer: 'above' }));
+    return [...fills, ...outlines];
 }
 
 // ---- E / H arrows ------------------------------------------------------------------
-// Arrows of the instantaneous transverse E and / or H at phase ωt on a regular lattice
-// over the visible range (re-sampled on zoom / pan). Direction from the instantaneous
-// vector; length from the peak magnitude on a log scale over two decades (the field is
-// singular at conductor corners, a linear length would hide almost every arrow) times
-// the instantaneous fraction, so arrows shrink and flip as ωt runs.
 const ARROW_COLORS = { E: 'rgba(70, 150, 255, 0.95)', H: 'rgba(255, 60, 60, 0.95)', S: 'rgba(255, 255, 255, 0.9)' };
+const ARROW_CHOICES = [['', 'Arrows: off'], ['E', 'E arrows'], ['H', 'H arrows'], ['EH', 'E + H arrows'],
+                       ['S', 'S markers'], ['EHS', 'E + H + S']];
 
 function getArrowOptions() {
-    const m = document.getElementById('plot-arrows')?.value || '';
-    const n = parseInt(document.getElementById('plot-arrow-density')?.value);
+    const solver = get.solver();
+    let m = elVal('plot-arrows') || '';
+    if (solver && !hasHField(solver)) m = m.replace(/[HS]/g, '');
+    const n = parseInt(elVal('plot-arrow-density'));
     return { E: m.includes('E'), H: m.includes('H'), S: m.includes('S'),
              density: Number.isFinite(n) && n >= 4 ? Math.min(n, 80) : 24 };
-}
-
-// The H / J field for the current mode and frequency, requested if missing.
-function ensureMqsField() {
-    const key = mqsKey();
-    if (mqsField && mqsField.key === key) return mqsField.ok ? mqsField : null;
-    if (mqsPending !== key && window.requestMqsField) {
-        mqsPending = key;
-        window.requestMqsField(mqsModeIndex(), fieldPlotFreq(), key);
-    }
-    return null;
-}
-
-function nearestIndex(arr, v) {
-    const n = arr.length;
-    if (v <= arr[0]) return 0;
-    if (v >= arr[n - 1]) return n - 1;
-    let lo = 0, hi = n - 1;
-    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (arr[mid] <= v) lo = mid; else hi = mid; }
-    return (v - arr[lo] < arr[hi] - v) ? lo : hi;
-}
-
-// Phasor sampler on a rectilinear grid (nearest node): (x, y) [m] → {xr, xi, yr, yi} | null.
-function gridPhasor(xs, ys, Xr, Xi, Yr, Yi) {
-    const x0 = xs[0], x1 = xs[xs.length - 1], y0 = ys[0], y1 = ys[ys.length - 1];
-    return (x, y) => {
-        if (x < x0 || x > x1 || y < y0 || y > y1) return null;
-        const i = nearestIndex(xs, x), j = nearestIndex(ys, y);
-        const xr = Xr[j] && Xr[j][i], yr = Yr[j] && Yr[j][i];
-        if (!Number.isFinite(xr) || !Number.isFinite(yr)) return null;
-        return { xr, xi: Xi ? Xi[j][i] || 0 : 0, yr, yi: Yi ? Yi[j][i] || 0 : 0 };
-    };
-}
-
-// Coax (radial result): Hφ from the rings, E_r = (η0/√εr)·Hφ in the dielectric.
-function coaxPhasor(f, which) {
-    const rings = f.rings, ETA0 = 376.730313668;
-    return (x, y) => {
-        const dx = x - f.cx, dy = y - f.cy, r = Math.hypot(dx, dy);
-        if (!(r > 0) || r > rings[rings.length - 1].r1) return null;
-        let lo = 0, hi = rings.length - 1;
-        while (lo < hi) { const mid = (lo + hi) >> 1; if (rings[mid].r1 < r) lo = mid + 1; else hi = mid; }
-        const g = rings[lo];
-        const c = dx / r, sn = dy / r;
-        if (which === 'H') return { xr: -g.Hr * sn, xi: -g.Hi * sn, yr: g.Hr * c, yi: g.Hi * c };
-        if (g.Jr !== null) return null;   // E only in the dielectric
-        const k = ETA0 / Math.sqrt(f.er || 1);
-        return { xr: k * g.Hr * c, xi: k * g.Hi * c, yr: k * g.Hr * sn, yi: k * g.Hi * sn };
-    };
-}
-
-function eSampler(solver, f) {
-    if (f && f.kind === 'wg' && f.Exr) return gridPhasor(f.x, f.y, f.Exr, null, f.Eyr, null);
-    if (f && f.kind === 'radial') return coaxPhasor(f, 'E');
-    const { Ex, Ey } = getFields();
-    if (!Ex || !Ey || !solver.x || !solver.y) return null;
-    return gridPhasor(solver.x, solver.y, Ex, null, Ey, null);
-}
-
-function hSampler(f) {
-    if (!f) return null;
-    if (f.kind === 'radial') return coaxPhasor(f, 'H');
-    return gridPhasor(f.x, f.y, f.Hxr, f.Hxi, f.Hyr, f.Hyi);
-}
-
-// Arrow polylines (mm) for the visible ranges xr, yr (mm). Returns { E: {x, y}, H: {x, y} }.
-function buildArrowData(solver, xr, yr) {
-    const opt = getArrowOptions();
-    const out = {};
-    if (!opt.E && !opt.H && !opt.S) return out;
-    const needH = opt.H || opt.S, needE = opt.E || opt.S;
-    const f = needH ? ensureMqsField() : (mqsField && mqsField.key === mqsKey() && mqsField.ok ? mqsField : null);
-    const samp = { E: needE ? eSampler(solver, f) : null, H: needH ? hSampler(f) : null };
-    const ph = getFieldDisplayOptions().phaseDeg * Math.PI / 180, cp = Math.cos(ph), sp = Math.sin(ph);
-    const W = xr[1] - xr[0], Hh = yr[1] - yr[0];
-    if (!(W > 0 && Hh > 0)) return out;
-    const nc = opt.density, nr = Math.max(2, Math.round(nc * Hh / W));
-    const pts = [];
-    for (let a = 0; a < nr; a++) for (let c = 0; c < nc; c++)
-        pts.push([xr[0] + W * (c + 0.5) / nc, yr[0] + Hh * (a + 0.5) / nr]);
-    const vals = {};
-    // E is zero inside metal; the static field grid can carry small difference values
-    // there, so E arrows are masked by the conductor geometry.
-    const conds = solver.conductors || [];
-    const inMetal = (x, y) => conds.some(c => shapeContains(c, x, y, 0));
-    for (const k of ['E', 'H']) {
-        if (!samp[k]) continue;
-        vals[k] = pts.map(([x, y]) => (k === 'E' && inMetal(x / 1000, y / 1000)) ? null : samp[k](x / 1000, y / 1000));
-    }
-    // Power flows along +z: if the time-average E × H* of the sampled fields points the
-    // other way (the static E and the MQS H are normalized independently), flip E.
-    if (vals.E && vals.H) {
-        let sz = 0;
-        vals.E.forEach((e, k) => {
-            const h = vals.H[k];
-            if (e && h) sz += (e.xr * h.yr + e.xi * h.yi) - (e.yr * h.xr + e.yi * h.xi);
-        });
-        if (sz < 0) vals.E = vals.E.map(e => e && { xr: -e.xr, xi: -e.xi, yr: -e.yr, yi: -e.yi });
-    }
-    // Poynting vector: the time average ½·Re(E × H*) points along z (out of the page
-    // for power flowing towards the viewer), drawn as ⊙ sized by its magnitude on the
-    // same two-decade log scale as the arrows.
-    if (opt.S && vals.E && vals.H) {
-        const sz = vals.E.map((e, k) => {
-            const h = vals.H[k];
-            return (e && h) ? 0.5 * ((e.xr * h.yr + e.xi * h.yi) - (e.yr * h.xr + e.yi * h.xi)) : 0;
-        });
-        const sorted = sz.filter(v => v > 0).sort((p, q) => p - q);
-        const X = [], Y = [], S = [];
-        if (sorted.length) {
-            const ref = sorted[Math.min(sorted.length - 1, Math.floor(0.98 * sorted.length))];
-            sz.forEach((v, idx) => {
-                if (!(v > 1e-2 * ref)) return;
-                const g = Math.min(1, Math.max(0, Math.log10(v / ref) / 2 + 1));
-                X.push(pts[idx][0]); Y.push(pts[idx][1]); S.push(4 + 10 * g);
-            });
-        }
-        out.S = { x: X, y: Y, size: S };
-    }
-    if (!opt.E) delete vals.E;
-    if (!opt.H) delete vals.H;
-    const Lcell = 0.9 * Math.min(W / nc, Hh / nr);
-    for (const k of Object.keys(vals)) {
-        const mags = vals[k].map(v => (v ? Math.sqrt(v.xr * v.xr + v.xi * v.xi + v.yr * v.yr + v.yi * v.yi) : 0));
-        const sorted = mags.filter(m => m > 0).sort((p, q) => p - q);
-        if (!sorted.length) { out[k] = { x: [], y: [] }; continue; }
-        const ref = sorted[Math.min(sorted.length - 1, Math.floor(0.98 * sorted.length))];
-        const X = [], Y = [];
-        vals[k].forEach((v, idx) => {
-            const m = mags[idx];
-            if (!v || !(m > 1e-3 * ref)) return;
-            const ix = v.xr * cp - v.xi * sp, iy = v.yr * cp - v.yi * sp;
-            const im = Math.hypot(ix, iy);
-            if (!(im > 1e-3 * m)) return;
-            const g = Math.min(1, Math.max(0, (Math.log10(m / ref) + 2) / 2));
-            const L = Lcell * (0.3 + 0.7 * g) * Math.min(1, im / m);
-            if (L < 0.08 * Lcell) return;
-            const ux = ix / im, uy = iy / im;
-            const [x, y] = pts[idx];
-            const xa = x - 0.5 * L * ux, ya = y - 0.5 * L * uy, xb = x + 0.5 * L * ux, yb = y + 0.5 * L * uy;
-            const hl = 0.35 * L, ca = Math.cos(Math.PI / 7), sa = Math.sin(Math.PI / 7);
-            X.push(xa, xb, null, xb, xb + hl * (-ux * ca + uy * sa), null, xb, xb + hl * (-ux * ca - uy * sa), null);
-            Y.push(ya, yb, null, yb, yb + hl * (-uy * ca - ux * sa), null, yb, yb + hl * (-uy * ca + ux * sa), null);
-        });
-        out[k] = { x: X, y: Y };
-    }
-    return out;
 }
 
 // Placeholder traces, filled by updateArrows() once the axis ranges are known.
@@ -606,7 +475,12 @@ function updateArrows() {
     const fl = container._fullLayout || container.layout;
     const xr = fl.xaxis && fl.xaxis.range, yr = fl.yaxis && fl.yaxis.range;
     if (!xr || !yr) return;
-    const d = buildArrowData(solver, [Math.min(...xr), Math.max(...xr)], [Math.min(...yr), Math.max(...yr)]);
+    const arrows = getArrowOptions();
+    const needF = arrows.H || arrows.S || (arrows.E && isWaveguide(solver));
+    const f = needF ? ensureMqsField() : currentMqsField();
+    const env = buildEnv(solver, currentView, f);
+    if (!env.ex.ok) return;
+    const d = buildArrowData(env, arrows, [Math.min(...xr), Math.max(...xr)], [Math.min(...yr), Math.max(...yr)]);
     const xs = [], ys = [];
     for (const k of idx) {
         const w = container.data[k].name[0];
@@ -614,302 +488,11 @@ function updateArrows() {
     }
     Plotly.restyle(container, { x: xs, y: ys }, idx);
     const sIdx = idx.find(k => container.data[k].name.startsWith('S power flow'));
-    if (sIdx !== undefined) Plotly.restyle(container, { 'marker.size': [(d.S && d.S.size) || []] }, [sIdx]);
+    if (sIdx !== undefined) {
+        Plotly.restyle(container, { 'marker.size': [(d.S && d.S.size) || []],
+                                    'marker.symbol': [(d.S && d.S.symbol) || 'circle-open-dot'] }, [sIdx]);
+    }
 }
-
-// ---- Power flow view: time-average Poynting vector S_z = ½·Re(E × H*)·ẑ ----------------
-// Normalized to 1 W transmitted power (∫S_z dA = 1 W), so every line type reads the same:
-// W/mm² per watt. E and H come from separately normalized calculations (static E, MQS
-// or closed-form H), so the field product is only used for its shape and sign, and the
-// normalization fixes the scale. Also reports the share of the power flowing inside
-// dielectrics with εr > 1 (the rest flows in air), which is what pulls ε_eff below εr.
-function dielectricAt(solver, x, y) {
-    let er = 1;
-    for (const d of (solver.dielectrics || [])) {
-        if (shapeContains(d, x, y, 0)) er = d.epsilon_r;
-    }
-    return er;
-}
-
-function buildPowerTraces(f, solver, view) {
-    const opt = getFieldDisplayOptions();
-    const unit = 'W/mm²';
-    let traces = [], shapes = [], lo = Infinity, hi = -Infinity;
-    let total = 0, inDiel = 0;
-    let xMM, yMM;
-    if (f.kind === 'radial') {
-        const k = 376.730313668 / Math.sqrt(f.er || 1);
-        const sv = f.rings.map(g => (g.Jr === null ? 0.5 * k * (g.Hr * g.Hr + g.Hi * g.Hi) : null));
-        f.rings.forEach((g, i) => { if (sv[i] !== null) total += sv[i] * Math.PI * (g.r1 * g.r1 - g.r0 * g.r0); });
-        const vals = sv.map(v => (v === null ? null : v / total * 1e-6));
-        const r = buildCoaxTraces({ ...f, _values: vals, _unit: unit }, false, view, 0);
-        r.title = `Power flow S_z (time average) per 1 W transmitted · ${formatFreq(f.f)}`;
-        return r;
-    }
-    const xs = f.x, ys = f.y, nx = xs.length, ny = ys.length;
-    const E = eSampler(solver, f);
-    if (!E) return null;
-    const conds = solver.conductors || [];
-    const Sz = [];
-    for (let j = 0; j < ny; j++) {
-        const row = new Array(nx);
-        for (let i = 0; i < nx; i++) {
-            const x = xs[i], y = ys[j];
-            const hx = f.Hxr[j][i], hy = f.Hyr[j][i];
-            if (!Number.isFinite(hx) || !Number.isFinite(hy) || Number.isFinite(f.J[j][i])
-                || conds.some(c => shapeContains(c, x, y, 0))) { row[i] = null; continue; }
-            const e = E(x, y);
-            if (!e) { row[i] = null; continue; }
-            row[i] = 0.5 * ((e.xr * hy + e.xi * f.Hyi[j][i]) - (e.yr * hx + e.yi * f.Hxi[j][i]));
-        }
-        Sz.push(row);
-    }
-    // Node areas (half the distance to each neighbour), then normalize to +1 W.
-    const dx = Array.from(xs, (v, i) => 0.5 * ((xs[Math.min(nx - 1, i + 1)] - xs[Math.max(0, i - 1)])));
-    const dy = Array.from(ys, (v, j) => 0.5 * ((ys[Math.min(ny - 1, j + 1)] - ys[Math.max(0, j - 1)])));
-    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-        const v = Sz[j][i];
-        if (v === null) continue;
-        const p = v * dx[i] * dy[j];
-        total += p;
-        if (dielectricAt(solver, xs[i], ys[j]) > 1.01) inDiel += p;
-    }
-    if (!(Math.abs(total) > 0)) return null;
-    const raw = Sz.map(row => row.map(v => (v === null ? null : v / total * 1e-6)));   // W/mm² per W
-    const useLog = opt.log;
-    const z = useLog ? raw.map(row => row.map(v => (v === null || v <= 0 ? null : Math.log10(v)))) : raw;
-    for (const row of z) for (const v of row) if (v !== null) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
-    let zmin = useLog ? Math.max(lo, hi - 4) : 0, zmax = hi;
-    if (!useLog) {
-        const a = [];
-        for (const row of raw) for (const v of row) if (v !== null && v > 0) a.push(v);
-        a.sort((p, q) => p - q);
-        if (a.length) zmax = a[Math.min(a.length - 1, Math.floor(0.99 * a.length))];
-    }
-    const dataMin = zmin, dataMax = zmax;
-    const override = window.getStoredScale ? window.getStoredScale(view) : null;
-    if (override) { zmin = override.min; zmax = override.max; }
-    const colorbar = { title: { text: useLog ? `log₁₀ ${unit}` : unit }, len: 0.8 };
-    if (useLog) Object.assign(colorbar, logTicks(zmin, zmax));
-    xMM = Array.from(xs, v => v * 1000); yMM = Array.from(ys, v => v * 1000);
-    traces.push({ type: 'heatmap', zsmooth: 'best', x: xMM, y: yMM, z, zmin, zmax, customdata: raw,
-        colorscale: 'Electric', colorbar,
-        hovertemplate: `x: %{x:.4f} mm<br>y: %{y:.4f} mm<br>S_z: %{customdata:.3e} ${unit} per W<extra></extra>` });
-    const share = inDiel / total;
-    const anyAir = (solver.dielectrics || []).some(d => d.epsilon_r <= 1.01) || share < 0.999;
-    const shareTxt = (share > 0.001 && anyAir) ? ` · ${(100 * share).toFixed(1)} % in the dielectric` : '';
-    const per = f.kind === 'wg' ? `, ${f.mode}` : (f.differential ? (f.mode === 'even' ? ', even mode' : ', odd mode') : '');
-    const title = `Power flow S_z (time average) per 1 W${per} · ${formatFreq(f.f)}${shareTxt}`;
-    return { traces, shapes, zMin: zmin, zMax: zmax, dataMin, dataMax, title, xMM, yMM };
-}
-
-// Coax: the field depends on the radius only, so it is drawn as filled concentric rings
-// (exactly round at any zoom, skin layers included) instead of a rectilinear heatmap.
-function buildCoaxTraces(r, isH, view, nFieldLines) {
-    const opt = getFieldDisplayOptions();
-    const ph = opt.phaseDeg * Math.PI / 180, cp = Math.cos(ph), sp = Math.sin(ph);
-    const isS = !!r._values;   // power flow view: values precomputed by buildPowerTraces
-    const vals = isS ? r._values : r.rings.map(g => {
-        if (isH) return opt.instantaneous ? Math.abs(g.Hr * cp - g.Hi * sp) : Math.hypot(g.Hr, g.Hi);
-        if (g.Jr === null) return null;
-        return (opt.instantaneous ? (g.Jr * cp - g.Ji * sp) : Math.hypot(g.Jr, g.Ji)) * 1e-6;
-    });
-    const signed = !isS && !isH && opt.instantaneous;
-    const useLog = opt.log && !signed;
-    const z = vals.map(v => (v === null ? null : (useLog ? Math.log10(Math.max(v, 1e-30)) : v)));
-    let lo = Infinity, hi = -Infinity, absMax = 0;
-    z.forEach(v => { if (v !== null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
-    vals.forEach(v => { if (v !== null) absMax = Math.max(absMax, Math.abs(v)); });
-    let zmin, zmax;
-    if (signed) { zmin = -absMax; zmax = absMax; }
-    else if (useLog) { zmax = hi; zmin = Math.max(lo, hi - (isH ? 3 : 4)); }
-    else { zmin = 0; zmax = absMax; }
-    const dataMin = zmin, dataMax = zmax;
-    const override = window.getStoredScale ? window.getStoredScale(view) : null;
-    if (override) { zmin = override.min; zmax = override.max; }
-    const scale = isS ? 'Electric' : (signed ? 'RdBu' : (isH ? 'Viridis' : 'Hot'));
-
-    // Ring shapes, merging neighbours of identical (quantized) color. Within each
-    // contiguous layer the rings are painted from the outside in, each one filled all
-    // the way down to the layer's inner radius: every ring lies on top of the previous
-    // one, so there are no anti-aliasing seams between adjacent rings.
-    const shapes = [];
-    const cxm = r.cx * 1000, cym = r.cy * 1000;
-    const groups = [];
-    let grp = null;
-    r.rings.forEach((g, k) => {
-        const v = z[k];
-        if (v === null) { grp = null; return; }
-        const color = colorAt(scale, (v - zmin) / ((zmax - zmin) || 1));
-        if (!grp || Math.abs(grp.r1 - g.r0) > 1e-15) { grp = { r0: g.r0, r1: g.r1, rings: [] }; groups.push(grp); }
-        const last = grp.rings[grp.rings.length - 1];
-        if (last && last.color === color) last.r1 = g.r1;
-        else grp.rings.push({ r0: g.r0, r1: g.r1, color });
-        grp.r1 = g.r1;
-    });
-    for (const gp of groups) {
-        for (let k = gp.rings.length - 1; k >= 0; k--) {
-            const rg = gp.rings[k];
-            shapes.push({ type: 'path', path: svgRingPath(cxm, cym, gp.r0 * 1000, rg.r1 * 1000, 360),
-                fillcolor: rg.color, fillrule: 'evenodd', line: { width: 0, color: 'rgba(0,0,0,0)' }, layer: 'between' });
-        }
-    }
-    // H field lines: concentric circles at evenly spaced values of A ∝ ln(b/r).
-    if (isH && nFieldLines > 0) {
-        for (let k = 1; k <= nFieldLines; k++) {
-            const rr = r.b * Math.pow(r.a / r.b, k / (nFieldLines + 1)) * 1000;
-            shapes.push({ type: 'circle', xref: 'x', yref: 'y', x0: cxm - rr, y0: cym - rr, x1: cxm + rr, y1: cym + rr,
-                line: { color: 'rgba(255, 255, 255, 0.55)', width: 1 }, fillcolor: 'rgba(0,0,0,0)', layer: 'above' });
-        }
-    }
-    const unit = isS ? 'W/mm²' : (isH ? 'A/m' : 'A/mm²');
-    const qty = isS ? 'S_z' : (isH ? '|H|' : (signed ? 'Jz' : '|Jz|'));
-    const colorbar = { title: { text: useLog ? `log₁₀ ${unit}` : unit }, len: 0.8 };
-    if (useLog) Object.assign(colorbar, logTicks(zmin, zmax));
-    const R = (r.b + r.tShield) * 1000;
-    // Hover probes along the +x radius (one per ring), the colorbar, and the axis extent.
-    const probes = r.rings.map((g, k) => ({ x: cxm + 500 * (g.r0 + g.r1), v: vals[k] })).filter(p => p.v !== null);
-    const traces = [
-        { type: 'scatter', mode: 'markers', x: [-R, R], y: [-R, R], marker: { size: 0, opacity: 0 },
-          hoverinfo: 'skip', showlegend: false },
-        { type: 'scatter', mode: 'markers', x: probes.map(p => p.x), y: probes.map(() => cym),
-          customdata: probes.map(p => p.v), marker: { size: 6, color: 'rgba(0,0,0,0)' }, showlegend: false,
-          hovertemplate: `r: %{x:.4f} mm<br>${qty}: %{customdata:.3e} ${unit}<extra></extra>` },
-        { type: 'scatter', mode: 'markers', x: [cxm], y: [cym], hoverinfo: 'skip', showlegend: false,
-          marker: { size: 0.1, opacity: 0, color: [zmin], cmin: zmin, cmax: zmax,
-                    colorscale: COLORSCALES[scale], showscale: true, colorbar } },
-    ];
-    const at = opt.instantaneous ? `, ωt = ${opt.phaseDeg}°` : ' (peak)';
-    const title = `${qty}${at} for 1 A · ${formatFreq(r.f)} · δ = ${formatLength(r.delta)}`;
-    return { traces, shapes, zMin: zmin, zMax: zmax, dataMin, dataMax, title, xMM: [-R, R], yMM: [-R, R] };
-}
-
-// Traces for the |H| / Jz views from a field result. Returns { traces, zMin, zMax,
-// dataMin, dataMax, title }. Magnitudes are peak phasor amplitudes for a 1 A line current.
-function buildMqsTraces(r, isH, view, nFieldLines) {
-    const opt = getFieldDisplayOptions();
-    const xMM = Array.from(r.x, v => v * 1000);
-    const yMM = Array.from(r.y, v => v * 1000);
-    const ph = opt.phaseDeg * Math.PI / 180, cp = Math.cos(ph), sp = Math.sin(ph);
-    const ny = r.y.length, nx = r.x.length;
-    // Raw values in display units: A/m for H, A/mm² for J.
-    const raw = [];
-    for (let j = 0; j < ny; j++) {
-        const row = new Array(nx);
-        for (let i = 0; i < nx; i++) {
-            let v;
-            if (isH) {
-                if (opt.instantaneous) {
-                    const hx = r.Hxr[j][i] * cp - r.Hxi[j][i] * sp;
-                    const hy = r.Hyr[j][i] * cp - r.Hyi[j][i] * sp;
-                    // The waveguide also has a longitudinal Hz.
-                    const hz = r.Hzr ? r.Hzr[j][i] * cp - r.Hzi[j][i] * sp : 0;
-                    v = Math.sqrt(hx * hx + hy * hy + hz * hz);
-                } else v = r.H[j][i];
-            } else if (opt.instantaneous && r.Jtr) {
-                // Waveguide wall current has a longitudinal and a perimeter component:
-                // magnitude of the instantaneous current vector.
-                const jz = r.Jr[j][i] * cp - r.Ji[j][i] * sp;
-                const jt = r.Jtr[j][i] * cp - r.Jti[j][i] * sp;
-                v = Math.hypot(jz, jt) * 1e-6;
-            } else {
-                v = opt.instantaneous ? (r.Jr[j][i] * cp - r.Ji[j][i] * sp) * 1e-6 : r.J[j][i] * 1e-6;
-            }
-            row[i] = Number.isFinite(v) ? v : null;
-        }
-        raw.push(row);
-    }
-    const signed = !isH && opt.instantaneous && !r.Jtr;
-    const useLog = opt.log && !signed;
-    let z = raw;
-    if (useLog) z = raw.map(row => row.map(v => (v === null ? null : Math.log10(Math.max(v, 1e-30)))));
-    let lo = Infinity, hi = -Infinity, absMax = 0;
-    for (const row of z) for (const v of row) {
-        if (v === null) continue;
-        if (v < lo) lo = v;
-        if (v > hi) hi = v;
-    }
-    for (const row of raw) for (const v of row) if (v !== null && Math.abs(v) > absMax) absMax = Math.abs(v);
-    // Linear scales default to the 99th percentile of |value|: the field is singular at
-    // the conductor corners, and a full-range linear scale would leave everything
-    // else at the bottom of the color map.
-    const p99 = (() => {
-        const a = [];
-        for (const row of raw) for (const v of row) if (v !== null && v !== 0) a.push(Math.abs(v));
-        if (!a.length) return absMax;
-        a.sort((p, q) => p - q);
-        return a[Math.min(a.length - 1, Math.floor(0.99 * a.length))] || absMax;
-    })();
-    let zmin, zmax;
-    if (signed) { zmin = -p99; zmax = p99; }
-    else if (useLog) { zmax = hi; zmin = Math.max(lo, hi - (isH ? 3 : 4)); }
-    else { zmin = 0; zmax = p99; }
-    const dataMin = zmin, dataMax = zmax;
-    const override = window.getStoredScale ? window.getStoredScale(view) : null;
-    if (override) { zmin = override.min; zmax = override.max; }
-
-    const unit = isH ? 'A/m' : 'A/mm²';
-    const qty = isH ? '|H|' : (signed ? 'Jz' : (r.Jtr ? '|J|' : '|Jz|'));
-    const colorbar = { title: { text: useLog ? `log₁₀ ${unit}` : unit }, len: 0.8 };
-    if (useLog) Object.assign(colorbar, logTicks(zmin, zmax));
-    const traces = [{
-        type: 'heatmap', zsmooth: 'best',
-        x: xMM, y: yMM, z, zmin, zmax,
-        customdata: raw,
-        colorscale: signed ? 'RdBu' : (isH ? 'Viridis' : 'Hot'),
-        // Plotly's RdBu runs blue → red with increasing z: positive current (the signal
-        // direction) is red, return current blue.
-        reversescale: false,
-        colorbar,
-        hovertemplate: `x: %{x:.4f} mm<br>y: %{y:.4f} mm<br>${qty}: %{customdata:.3e} ${unit}<extra></extra>`,
-    }];
-    if (isH && nFieldLines > 0 && r.kind === 'wg' && !getArrowOptions().H) {
-        // Waveguide: the transverse H is not divergence-free in the cross-section (its
-        // sources are ∂Hz/∂z), so it has no potential to draw contours of. Arrows of the
-        // instantaneous transverse field instead.
-        traces.push(quiverTrace(r, cp, sp, nFieldLines));
-    }
-    if (isH && nFieldLines > 0 && r.Ar) {
-        // H field lines = contour lines of the instantaneous vector potential
-        // Re{A·e^(jωt)} (ωt from the phase setting, 0 by default). The levels are spread
-        // evenly over the range A takes in the dielectric, so the line density is
-        // proportional to |H| and the lines close around each current. Inside the
-        // metal only the levels that A reaches there are drawn (the skin layer).
-        const A = [];
-        let aLo = Infinity, aHi = -Infinity;
-        for (let j = 0; j < ny; j++) {
-            const row = new Array(nx);
-            for (let i = 0; i < nx; i++) {
-                const v = r.Ar[j][i] * cp - r.Ai[j][i] * sp;
-                if (!Number.isFinite(v)) { row[i] = null; continue; }
-                row[i] = v;
-                if (!Number.isFinite(r.J[j][i])) {   // dielectric point
-                    if (v < aLo) aLo = v;
-                    if (v > aHi) aHi = v;
-                }
-            }
-            A.push(row);
-        }
-        if (aHi > aLo) {
-            const step = (aHi - aLo) / (nFieldLines + 1);
-            traces.push({
-                type: 'contour', x: xMM, y: yMM, z: A,
-                contours: { coloring: 'none', showlines: true,
-                    start: aLo + step, end: aHi - step * 0.999, size: step },
-                line: { smoothing: 1.0, width: 1, color: 'rgba(255, 255, 255, 0.55)' },
-                showscale: false, hoverinfo: 'skip',
-                name: 'H field lines',
-            });
-        }
-    }
-    const per = r.per || (r.differential ? '1 A per trace' : '1 A');
-    const modeLabel = r.differential ? (r.mode === 'even' ? ', even mode' : ', odd mode')
-        : (r.kind === 'wg' ? `, ${r.mode}` : '');
-    const at = opt.instantaneous ? `, ωt = ${opt.phaseDeg}°` : ' (peak)';
-    const title = `${qty}${at} for ${per}${modeLabel} · ${formatFreq(r.f)} · δ = ${formatLength(r.delta)}`;
-    return { traces, zMin: zmin, zMax: zmax, dataMin, dataMax, title, xMM, yMM };
-}
-
 // Get actual data range (before any user scaling)
 function getActualDataRange() {
     return { min: actualDataMin, max: actualDataMax };
@@ -918,38 +501,10 @@ function getActualDataRange() {
 function setScaleRange(min, max) {
     zMin = min;
     zMax = max;
-
-    const container = document.getElementById('sim_canvas');
-    const Plotly = getPlotly();
-    if (!container || !container.data || !Plotly) return;
-
-    const n = getPlotOptions().contours;
-
-    // The shared log-spaced "E-field contours" line trace appears in BOTH the geometry overlay
-    // and the |E| field view — rescale its log levels identically wherever it is.
-    const cIdx = container.data.findIndex(t => t.type === 'contour' && t.name === 'E-field contours');
-    if (cIdx !== -1 && n > 0) {
-        const limits = contourScaledB(min, max, n);
-        Plotly.restyle(container, {
-            'contours.start': limits[0], 'contours.end': limits[1], 'contours.size': limits[2]
-        }, [cIdx]);
-    }
-
-    // Field views also carry the color in a heatmap (|E|) or a linear contour (potential) — update
-    // its zmin/zmax (and linear levels for the potential contour). The geometry view has no such trace.
-    if (currentView !== "geometry") {
-        const hIdx = container.data.findIndex(t =>
-            t.type === 'heatmap' || (t.type === 'contour' && t.name !== 'E-field contours'));
-        if (hIdx !== -1) {
-            const restyle = { zmin: min, zmax: max };
-            if (container.data[hIdx].type === 'contour' && n > 0) {
-                restyle['contours.start'] = min;
-                restyle['contours.end'] = max;
-                restyle['contours.size'] = (max - min) / n;
-            }
-            Plotly.restyle(container, restyle, [hIdx]);
-        }
-    }
+    // The views read the stored override (window.getStoredScale) while they are built, so
+    // a redraw applies it everywhere: heatmaps, the ring views of the coax and the
+    // contour levels tied to the color scale.
+    draw();
 }
 
 function draw(resetZoom = false) {
@@ -958,7 +513,6 @@ function draw(resetZoom = false) {
     if (!solver || !Plotly) return;
 
     const container = document.getElementById('sim_canvas');
-    const plotOptions = getPlotOptions();
 
     // Preserve current view state if plot exists (unless resetZoom is requested)
     let currentXRange = null;
@@ -968,334 +522,109 @@ function draw(resetZoom = false) {
         currentYRange = container.layout.yaxis.range;
     }
 
-    let zData = [];
     let title = "";
-    let colorscale = "Viridis";
-    let zTitle = "";
+    let subtitle = "";
     let shapes = [];
-    let xMM, yMM, nx, ny, nyDisplay;
-    let mqsView = null;   // set by the H / J views
+    let traces = [];
+    let xMM, yMM;
+    let fieldView = null;   // result of buildFieldView for the field views
+    const wg = isWaveguide(solver);
+    const maxY = Math.max(
+        solver.dielectrics.reduce((max, d) => Math.max(max, d.y_max), 0),
+        solver.conductors.reduce((max, c) => Math.max(max, c.y_max), 0)
+    );
+    const gridMM = () => {
+        if (solver.x && solver.y) return [Array.from(solver.x, v => v * 1000), Array.from(solver.y, v => v * 1000)];
+        return [[0, (solver.w || 1) * 2000], [0, (maxY || solver.h || 1) * 1000]];
+    };
+    const view = currentView.startsWith('potential') ? 'potential'
+        : currentView.startsWith('efield') ? 'efield' : currentView;
+    const VIEW_NAMES = { potential: 'Potential', efield: '|E| field', hfield: 'H field',
+                         jfield: 'Current density', sfield: 'Power flow' };
 
-    // View selection
-    if (currentView === "geometry") {
+    if (view === "geometry") {
         title = "Transmission Line Geometry";
-
-        // Determine display bounds using actual domain extent
-        const maxY = Math.max(
-            solver.dielectrics.reduce((max, d) => Math.max(max, d.y_max), 0),
-            solver.conductors.reduce((max, c) => Math.max(max, c.y_max), 0)
-        );
-
-        // Calculate intelligent zoom ranges for initial view (only if no current view exists)
         if (!currentXRange || resetZoom) {
-            const view = computeGeometryView(solver, maxY);
-            if (view) { currentXRange = view.xRange; currentYRange = view.yRange; }
+            const gv = computeGeometryView(solver, maxY);
+            if (gv) { currentXRange = gv.xRange; currentYRange = gv.yRange; }
         }
-
-        // Dielectrics (opaque, below the field contours) + conductors above.
+        // Dielectrics below, conductors under the field lines (with their outline on top).
         shapes.push(...dielectricFillShapes(solver, maxY));
-        shapes.push(...conductorFillShapes(solver, maxY));
-
-        // If solution available, overlay E-field contours
+        shapes.push(...conductorLayerShapes(solver, maxY));
+        [xMM, yMM] = gridMM();
         if (solver.solution_valid && solver.mesh_generated) {
-            nx = solver.x.length;
-            ny = solver.y.length;
+            // Field lines and equipotentials of the current excitation and time display.
+            const f = wg ? ensureMqsField() : currentMqsField();
+            const env = buildEnv(solver, 'geometry', f);
+            if (env.ex.ok) traces.push(...geometryLines(env));
+        }
+        // Invisible scatter for the axis scaling.
+        traces.unshift({ type: "scatter", x: [xMM[0], xMM[xMM.length - 1]], y: [yMM[0], yMM[yMM.length - 1]],
+                         mode: "markers", marker: { size: 0, opacity: 0 }, showlegend: false, hoverinfo: "skip" });
+    }
 
-            // Limit display Y
-            const yArr = Array.from(solver.y);
-            const maxYIdx = yArr.findIndex(y => y > maxY);
-            nyDisplay = maxYIdx > 0 ? maxYIdx : ny;
-
-            xMM = Array.from(solver.x, v => v * 1000);
-            yMM = yArr.slice(0, nyDisplay).map(v => v * 1000);
-
-            // Compute E-field magnitude
-            const { Ex, Ey } = getFields();
-            if (Ex && Ey && Ex.length >= nyDisplay) {
-                for (let i = 0; i < nyDisplay; i++) {
-                    const row = [];
-                    if (Ex[i] && Ey[i]) {
-                        for (let j = 0; j < nx; j++) {
-                            row.push(Math.hypot(Ex[i][j], Ey[i][j]));
-                        }
-                    }
-                    zData.push(row);
-                }
-            }
-            if (zData.length > 0) {
-                const flatZ = zData.flat();
-                zMin = Math.min(...flatZ);
-                zMax = Math.max(...flatZ);
-                // Store actual data range for geometry view
-                actualDataMin = zMin;
-                actualDataMax = zMax;
-            }
+    else if (VIEW_NAMES[view] && solver.solution_valid) {
+        if (!solver.mesh_generated) solver.ensure_mesh();
+        const needF = view === 'hfield' || view === 'jfield' || view === 'sfield' || (wg && view === 'efield');
+        const f = needF ? ensureMqsField() : currentMqsField();
+        const failed = needF && !f && mqsField && mqsField.key === mqsKey() && !mqsField.ok;
+        if (failed) {
+            title = `${VIEW_NAMES[view]} not available (see log)`;
+        } else if (needF && !f) {
+            title = `Computing ${VIEW_NAMES[view].toLowerCase()} at ${formatFreq(fieldPlotFreq())}…`;
         } else {
-            // No solution - just axis scaling
-            xMM = [0, solver.w * 2000];
-            yMM = [0, maxY * 1000];
-        }
-    }
-
-    else if ((currentView === "potential" || currentView === "potential_odd" || currentView === "potential_even") && solver.solution_valid) {
-        // Ensure mesh exists for field visualization
-        if (!solver.mesh_generated) {
-            solver.ensure_mesh();
-        }
-
-        nx = solver.x.length;
-        ny = solver.y.length;
-
-        // Limit display Y to domain extent
-        const yArr = Array.from(solver.y);
-        const maxY = yArr[ny - 1];
-        const maxYIdx = yArr.findIndex(y => y > maxY);
-        nyDisplay = maxYIdx > 0 ? maxYIdx : ny;
-
-        xMM = Array.from(solver.x, v => v * 1000);
-        yMM = yArr.slice(0, nyDisplay).map(v => v * 1000);
-
-        let modeLabel = "";
-        if (currentView === "potential_odd") {
-            modeLabel = " (Odd Mode)";
-        } else if (currentView === "potential_even") {
-            modeLabel = " (Even Mode)";
-        }
-        title = `Electric Potential${modeLabel} (V)`;
-        zTitle = "Volts";
-
-        const V = getPotential();
-        if (V && V.length >= nyDisplay) {
-            for (let i = 0; i < nyDisplay; i++) {
-                zData.push(Array.from(V[i].slice(0, nx)));
+            const env = buildEnv(solver, view, f);
+            fieldView = buildFieldView(env);
+            if (fieldView.pending) {
+                title = `Computing ${VIEW_NAMES[view].toLowerCase()} at ${formatFreq(fieldPlotFreq())}…`;
+                fieldView = null;
+            } else if (fieldView.error) {
+                title = fieldView.error;
+                fieldView = null;
+            } else {
+                traces.push(...fieldView.traces);
+                shapes.push(...(fieldView.shapes || []));
+                title = `${fieldView.title} · ${formatFreq(env.freq)}`;
+                subtitle = env.ex.label + (fieldView.info ? ` · ${fieldView.info}` : '');
+                xMM = fieldView.xMM; yMM = fieldView.yMM;
+                zMin = fieldView.zMin; zMax = fieldView.zMax;
+                actualDataMin = fieldView.dataMin; actualDataMax = fieldView.dataMax;
             }
         }
-        const flatZ = zData.flat();
-        zMin = Math.min(...flatZ);
-        zMax = Math.max(...flatZ);
-        // Store actual data range for potential view
-        actualDataMin = zMin;
-        actualDataMax = zMax;
-    }
-
-    else if ((currentView === "efield" || currentView === "efield_odd" || currentView === "efield_even") && solver.solution_valid) {
-        // Ensure mesh exists for field visualization
-        if (!solver.mesh_generated) {
-            solver.ensure_mesh();
+        if (!xMM) [xMM, yMM] = gridMM();
+        if (!fieldView) {
+            // Waiting for (or missing) data: invisible scatter keeps the axes.
+            traces.push({ type: "scatter", x: [xMM[0], xMM[xMM.length - 1]], y: [yMM[0], yMM[yMM.length - 1]],
+                          mode: "markers", marker: { size: 0, opacity: 0 }, showlegend: false, hoverinfo: "skip" });
         }
-
-        nx = solver.x.length;
-        ny = solver.y.length;
-
-        // Limit display Y to actual domain extent
-        const yArr = Array.from(solver.y);
-        const maxY = yArr[ny - 1];
-        const maxYIdx = yArr.findIndex(y => y > maxY);
-        nyDisplay = maxYIdx > 0 ? maxYIdx : ny;
-
-        xMM = Array.from(solver.x, v => v * 1000);
-        yMM = yArr.slice(0, nyDisplay).map(v => v * 1000);
-
-        let modeLabel = "";
-        if (currentView === "efield_odd") {
-            modeLabel = " (Odd Mode)";
-        } else if (currentView === "efield_even") {
-            modeLabel = " (Even Mode)";
-        }
-        title = `|E| Field Magnitude${modeLabel} (V/m)`;
-        zTitle = "V/m";
-
-        const { Ex, Ey } = getFields();
-        if (Ex && Ey && Ex.length >= nyDisplay) {
-            for (let i = 0; i < nyDisplay; i++) {
-                const row = [];
-                if (Ex[i] && Ey[i]) {
-                    for (let j = 0; j < nx; j++) {
-                        row.push(Math.hypot(Ex[i][j], Ey[i][j]));
-                    }
-                }
-                zData.push(row);
-            }
-        }
-        const flatZ = zData.flat();
-        zMin = Math.min(...flatZ);
-        zMax = Math.max(...flatZ);
-        // Store actual data range for efield view
-        actualDataMin = zMin;
-        actualDataMax = zMax;
-        // Mask the conductor interior (field is 0 inside the PEC) so the heatmap/contour bleed
-        // across the boundary is hidden, like the geometry view.
-        shapes.push(...conductorFillShapes(solver, yArr[nyDisplay - 1]));
-    }
-
-    else if ((currentView === "hfield" || currentView === "jfield" || currentView === "sfield") && solver.solution_valid) {
-        const isH = currentView === "hfield";
-        const isS = currentView === "sfield";
-        const key = mqsKey();
-        const yArr = Array.from(solver.y || []);
-        xMM = Array.from(solver.x || [0, 1e-3], v => v * 1000);
-        yMM = yArr.map(v => v * 1000);
-        const maxY = yArr.length ? yArr[yArr.length - 1] : 0;
-        if (!mqsField || mqsField.key !== key) {
-            title = `Computing ${isS ? 'power flow' : (isH ? 'H field' : 'current density')} at ${formatFreq(fieldPlotFreq())}…`;
-            if (mqsPending !== key && window.requestMqsField) {
-                mqsPending = key;
-                window.requestMqsField(mqsModeIndex(), fieldPlotFreq(), key);
-            }
-        } else if (!mqsField.ok) {
-            title = `${isS ? 'Power flow' : (isH ? 'H field' : 'Current density')} not available (see log)`;
+        const yTop = solver.y ? solver.y[solver.y.length - 1] : maxY;
+        if (view === 'hfield' || view === 'jfield' || view === 'sfield') {
+            // The field lives inside the metal too: outlines only.
+            shapes.push(...outlineShapes(solver, Math.max(maxY, yTop)));
         } else {
-            // Field lines in the H view: the Streamlines count, 20 when left empty
-            // (an explicit 0 turns them off).
-            const slRaw = (document.getElementById('plot-streamlines')?.value || '').trim();
-            const nLines = slRaw === '' ? 20 : Math.max(0, parseInt(slRaw) || 0);
-            mqsView = isS ? buildPowerTraces(mqsField, solver, currentView)
-                : mqsField.kind === 'radial'
-                ? buildCoaxTraces(mqsField, isH, currentView, nLines)
-                : buildMqsTraces(mqsField, isH, currentView, nLines);
-            if (!mqsView) title = 'Power flow not available (no E field)';
-            title = mqsView.title;
-            xMM = mqsView.xMM; yMM = mqsView.yMM;
-            zMin = mqsView.zMin; zMax = mqsView.zMax;
-            actualDataMin = mqsView.dataMin; actualDataMax = mqsView.dataMax;
+            shapes.push(...dielectricFillShapes(solver, Math.max(maxY, yTop), {
+                alpha: 0, airAlpha: 0, layer: 'above', lineColor: 'rgba(200, 200, 200, 0.3)' }));
+            shapes.push(...conductorLayerShapes(solver, Math.max(maxY, yTop)));
         }
-        if (mqsView && mqsView.shapes) shapes.push(...mqsView.shapes);
-        shapes.push(...outlineShapes(solver, maxY));
     }
 
     else {
         title = "No Data Available";
-        // Create minimal dummy data
-        xMM = [0, (solver.w || 1) * 2000];
-        yMM = [0, (solver.h || 1) * 1000];
+        [xMM, yMM] = gridMM();
+        traces.push({ type: "scatter", x: xMM, y: yMM, mode: "markers", marker: { size: 0, opacity: 0 },
+                      showlegend: false, hoverinfo: "skip" });
     }
 
-    // Save original mesh coordinates for mesh overlay before interpolation
-    let xMM_mesh = xMM;
-    let yMM_mesh = yMM;
-    let nx_mesh = nx;
-    let nyDisplay_mesh = nyDisplay;
-
-    // Main field trace
-    let traces = [];
-
-    if (currentView === "geometry" && zData.length > 0) {
-        const { Ex, Ey } = getFields();
-
-        let eMax = Math.max(...zData.flat());
-        let eMin = Math.min(...zData.flat());
-
-        // Check if there's a user-defined scale override
-        if (window.getStoredScale) {
-            const override = window.getStoredScale(currentView);
-            if (override) {
-                eMin = override.min;
-                eMax = override.max;
-            }
-        }
-
-        const n = plotOptions.contours;
-
-        // Add E-field contours if requested (shared with the |E| field view)
-        if (n > 0) {
-            traces.push(efieldContourTrace(xMM, yMM, zData, eMin, eMax, n));
-        }
-
-        // Add streamlines if requested via plot options
-        if (plotOptions.streamlines > 0) {
-            const modeIndex = getSelectedModeIndex();
-            const mode = modeIndex === 1 ? 'even' : 'odd';
-
-            traces.push(
-                makeStreamlineTraceFromConductors(
-                    Ex,
-                    Ey,
-                    solver.x,
-                    solver.y,
-                    solver.conductors,
-                    plotOptions.streamlines,
-                    mode
-                )
-            );
-        }
-
-    } else if (currentView === "geometry") {
-        // Geometry only. Invisible scatter for axis scaling
-        traces.push({
-            type: "scatter",
-            x: xMM,
-            y: yMM,
-            mode: "markers",
-            marker: { size: 0, opacity: 0 },
-            showlegend: false,
-            hoverinfo: "skip"
-        });
-    } else if (mqsView) {
-        traces.push(...mqsView.traces);
-    } else if (currentView === "hfield" || currentView === "jfield" || currentView === "sfield") {
-        // Waiting for (or missing) H / J data: invisible scatter keeps the axes.
-        traces.push({
-            type: "scatter", x: xMM, y: yMM, mode: "markers",
-            marker: { size: 0, opacity: 0 }, showlegend: false, hoverinfo: "skip"
-        });
-    } else if (zData.length > 0) {
-        // Field views. Heatmap with optional contour lines.
-
-        // Check if there's a user-defined scale override
-        if (window.getStoredScale) {
-            const override = window.getStoredScale(currentView);
-            if (override) {
-                zMin = override.min;
-                zMax = override.max;
-            }
-        }
-
-        const n = plotOptions.contours;
-        const hoverTpl = "x: %{x:.2f} mm<br>y: %{y:.2f} mm<br>value: %{z:.3e}<extra></extra>";
-
-        if (currentView.startsWith("efield")) {
-            // |E| heatmap (linear) for the color + colorbar...
-            traces.push({
-                type: "heatmap",
-                zsmooth: "best",
-                x: xMM, y: yMM, z: zData,
-                zmin: zMin, zmax: zMax,
-                colorscale: colorscale,
-                colorbar: { title: zTitle, len: 0.8 },
-                hovertemplate: hoverTpl
-            });
-            // ...overlaid with the SAME log-spaced contour-line trace the geometry view uses.
-            if (n > 0) {
-                traces.push(efieldContourTrace(xMM, yMM, zData, Math.max(zMin, 0), zMax, n));
-            }
-        } else {
-            // Potential (and any other field view): linear heatmap + linear contour lines.
-            const contourSettings = { coloring: 'heatmap', showlines: n > 0 };
-            if (n > 0) {
-                contourSettings.start = zMin;
-                contourSettings.end = zMax;
-                contourSettings.size = (zMax - zMin) / n;
-            }
-            traces.push({
-                type: n > 0 ? "contour" : "heatmap",
-                zsmooth: "best",
-                x: xMM, y: yMM, z: zData,
-                zmin: zMin, zmax: zMax,
-                colorscale: colorscale,
-                contours: contourSettings,
-                line: { smoothing: 1.3, width: 0.5 },
-                colorbar: { title: zTitle, len: 0.8 },
-                hovertemplate: hoverTpl
-            });
-        }
-    }
+    // Static grid for the rectilinear mesh overlay.
+    const [xMM_mesh, yMM_mesh] = gridMM();
+    const nx_mesh = xMM_mesh.length, nyDisplay_mesh = yMM_mesh.length;
+    const mqsView = !!fieldView && (view === 'hfield' || view === 'jfield' || view === 'sfield');
 
     // E / H arrows (filled by updateArrows once the axis ranges are known).
     const arrowTr = solver.solution_valid ? arrowPlaceholders() : [];
-    if (arrowTr.length) {
-        for (const t of traces) if (t.showlegend === undefined) t.showlegend = false;
-        traces.push(...arrowTr);
-    }
+    traces.push(...arrowTr);
+    for (const t of traces) if (t.showlegend === undefined) t.showlegend = false;
+    const anyLegend = traces.some(t => t.showlegend);
 
     // Mesh overlay
     // The H / J views were computed on the skin-refined eddy-current mesh, show that one.
@@ -1353,9 +682,16 @@ function draw(resetZoom = false) {
         }
     }
 
-    // UI menues
+    // UI menus: view, odd / even mode (differential lines) and arrows, in one row above
+    // the plot area. The title sits above them.
+    const menuBase = { y: 1.01, yanchor: 'bottom', xanchor: 'left', showactive: true,
+                       bgcolor: '#2a2a2a', bordercolor: '#444', font: { color: '#aaa' }, pad: { t: 0, b: 2 } };
+    const titleText = subtitle
+        ? `${title}<br><span style="font-size:12px;color:#bbb">${subtitle}</span>`
+        : title;
     const layout = {
-        title: { text: title, font: { color: '#fff' } },
+        title: { text: titleText, font: { color: '#fff', size: 15 }, x: 0.5, xanchor: 'center',
+                 y: 0.985, yref: 'container', yanchor: 'top' },
         xaxis: {
             title: { text: "Width (mm)", font: { color: '#aaa' } },
             scaleanchor: "y",
@@ -1372,8 +708,8 @@ function draw(resetZoom = false) {
             gridcolor: '#444',
             zerolinecolor: '#555'
         },
-        margin: { l: 70, r: 90, t: 50, b: 60 },
-        showlegend: arrowTr.length > 0,
+        margin: { l: 70, r: 90, t: subtitle ? 92 : 78, b: 60 },
+        showlegend: anyLegend,
         legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top', bgcolor: 'rgba(30,30,30,0.7)',
                   bordercolor: '#555', borderwidth: 1, font: { color: '#ddd', size: 11 } },
         hovermode: "closest",
@@ -1411,41 +747,26 @@ function draw(resetZoom = false) {
                 : currentView === "hfield" ? "|H| Field"
                 : currentView === "jfield" ? "Current J"
                 : currentView === "sfield" ? "Power flow S" : "|E| Field";
-            menus.push({
-                x: 0.01,
-                y: 1.15,
-                showactive: true,
+            menus.push({ ...menuBase, name: 'view', x: 0.0,
                 active: Math.max(0, viewButtons.findIndex(b => b.label === activeLabel)),
-                bgcolor: '#2a2a2a',
-                bordercolor: '#444',
-                font: { color: '#aaa' },
-                buttons: viewButtons
-            });
+                buttons: viewButtons });
 
+            let x = 0.17;
             // Mode selector (Odd/Even) - only for differential lines
             if (isDifferentialMode()) {
-                const modeIndex = getSelectedModeIndex();
-                menus.push({
-                    x: 0.25,
-                    y: 1.15,
-                    showactive: true,
-                    active: modeIndex,
-                    bgcolor: '#2a2a2a',
-                    bordercolor: '#444',
-                    font: { color: '#aaa' },
-                    buttons: [
-                        {
-                            label: "Odd Mode",
-                            method: "skip",
-                            args: []
-                        },
-                        {
-                            label: "Even Mode",
-                            method: "skip",
-                            args: []
-                        }
-                    ]
-                });
+                menus.push({ ...menuBase, name: 'mode', x, active: getSelectedModeIndex(),
+                    buttons: [{ label: "Odd Mode", method: "skip", args: [] },
+                              { label: "Even Mode", method: "skip", args: [] }] });
+                x += 0.15;
+            }
+
+            // Arrow selector: E, H and S need the H field of the Full-wave solver.
+            if (solver.solution_valid) {
+                const choices = ARROW_CHOICES.filter(([v]) => hasHField(solver) || !/[HS]/.test(v));
+                const cur = elVal('plot-arrows') || '';
+                menus.push({ ...menuBase, name: 'arrows', x,
+                    active: Math.max(0, choices.findIndex(([v]) => v === cur)),
+                    buttons: choices.map(([v, label]) => ({ label, method: 'skip', args: [], value: v })) });
             }
 
             return menus;
@@ -1484,21 +805,23 @@ function draw(resetZoom = false) {
 
     if (!container._viewListenerBound) {
         container.on('plotly_buttonclicked', (event) => {
-            // Determine which menu was clicked based on x position
-            // First menu (x=0.01): View selector (Geometry/Potential/E-field)
-            // Second menu (x=0.25): Mode selector (Odd/Even) - only for differential
-
-            if (event.menu.x < 0.2) {
-                // View selector clicked. Key off the LABEL, not the index: the Potential
-                // button is absent for a source-free medium (see the button list above),
-                // so index 1 is not always "potential".
-                const btn = event.menu.buttons[event.menu.active];
-                const label = btn && btn.label;
+            // Which menu: by name (view / mode / arrows), x position as a fallback.
+            const name = event.menu.name || (event.menu.x < 0.1 ? 'view' : 'mode');
+            const btn = event.menu.buttons[event.menu.active];
+            const label = btn && btn.label;
+            if (name === 'view') {
+                // Key off the LABEL, not the index: the Potential button is absent for a
+                // source-free medium (see the button list above), so index 1 is not always
+                // "potential".
                 setCurrentView(label === "Geometry" ? "geometry"
                     : label === "Potential" ? "potential"
                     : label === "|H| Field" ? "hfield"
                     : label === "Current J" ? "jfield"
                     : label === "Power flow S" ? "sfield" : "efield");
+            } else if (name === 'arrows') {
+                const choice = ARROW_CHOICES.find(([, l]) => l === label);
+                const sel = document.getElementById('plot-arrows');
+                if (sel && choice) sel.value = choice[0];
             } else {
                 // Mode selector clicked (differential lines only)
                 const plotModeEl = document.getElementById('plot-mode');
@@ -2039,20 +1362,6 @@ function getPotential() {
         // Single-ended mode
         return solver.V[0];
     }
-}
-
-// Get plot options from sidebar
-function getPlotOptions() {
-    const streamlinesEl = document.getElementById('plot-streamlines');
-    const contoursEl = document.getElementById('plot-contours');
-
-    const streamlinesVal = streamlinesEl ? streamlinesEl.value.trim() : '';
-    const contoursVal = contoursEl ? contoursEl.value.trim() : '';
-
-    return {
-        streamlines: streamlinesVal === '' ? 0 : parseInt(streamlinesVal) || 0,
-        contours: contoursVal === '' ? 0 : parseInt(contoursVal) || 0
-    };
 }
 
 // Function to set current view

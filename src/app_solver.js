@@ -1,6 +1,7 @@
 // MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
 // added the on-demand H / J field request, scale-dialog types and plot option handlers
-// (incl. E / H field arrows).
+// (incl. E / H field arrows); 2026-10-02: excitation, time display with ▶ animation and
+// line termination controls of the field views.
 // See FORK_CHANGES.md for the full list of changes.
 
 import { Complex } from './complex.js';
@@ -1547,6 +1548,7 @@ function updateGeometry() {
     pbar.style.width = "0%";
 
     solver = buildSolverFromParams(getParams());
+    updateFieldControls();
 }
 
 // Build a FieldSolver from the given sidebar params WITHOUT touching any global state.
@@ -2510,41 +2512,50 @@ function bindEvents() {
         });
     }
 
-    // Plot options - streamlines and contours
-    const plotStreamlinesEl = document.getElementById('plot-streamlines');
-    const plotContoursEl = document.getElementById('plot-contours');
-    if (plotStreamlinesEl) {
-        plotStreamlinesEl.addEventListener('change', () => {
-            if (solver && solver.solution_valid) {
-                draw();
-            }
-        });
-    }
-    if (plotContoursEl) {
-        plotContoursEl.addEventListener('change', () => {
-            if (solver && solver.solution_valid) {
-                draw();
-            }
-        });
-    }
-
-    // Plot options - H / J field views. A new frequency requests a new solve (the
-    // plot keys its cached field on it), the display options just redraw. Display or
-    // scale changes reset a stored color-scale override, its units no longer match.
+    // Plot options of the field views. A new field frequency requests a new H / J solve
+    // (the plot keys its cached field on it), everything else just redraws. Changes that
+    // alter the units or the scale of a view reset its stored color-scale override.
     const resetFieldScales = () => {
-        for (const k of ['hfield', 'jfield', 'sfield']) { scaleRanges[k].min = null; scaleRanges[k].max = null; }
+        for (const k of Object.keys(scaleRanges)) { scaleRanges[k].min = null; scaleRanges[k].max = null; }
     };
-    for (const id of ['plot-field-freq', 'plot-field-display', 'plot-field-scale', 'plot-field-phase',
-                      'plot-arrows', 'plot-arrow-density']) {
+    const SCALE_IDS = ['plot-field-freq', 'plot-field-display', 'plot-field-scale', 'plot-exc-kind',
+                       'plot-exc-value', 'plot-exc-rms', 'plot-sw-load', 'plot-sw-zl', 'plot-sw-pos'];
+    for (const id of ['plot-streamlines', 'plot-contours', 'plot-contour-kind', 'plot-field-phase',
+                      'plot-arrows', 'plot-arrow-density', ...SCALE_IDS]) {
         const el = document.getElementById(id);
         if (!el) continue;
         el.addEventListener('change', () => {
-            if (['plot-field-freq', 'plot-field-display', 'plot-field-scale'].includes(id)) resetFieldScales();
+            if (SCALE_IDS.includes(id)) resetFieldScales();
+            updateFieldControls();
             if (solver && solver.solution_valid) draw();
         });
     }
     const phaseEl = document.getElementById('plot-field-phase');
     if (phaseEl) phaseEl.addEventListener('input', () => { if (solver && solver.solution_valid) draw(); });
+    const swPosEl = document.getElementById('plot-sw-pos');
+    if (swPosEl) swPosEl.addEventListener('input', () => { if (solver && solver.solution_valid) draw(); });
+
+    // ▶ runs through ωt (switching to the instantaneous display), ■ stops.
+    const playBtn = document.getElementById('plot-field-play');
+    let playing = false;
+    const stopPlay = () => { playing = false; if (playBtn) playBtn.innerHTML = '&#9654;'; };
+    const step = () => {
+        if (!playing) return;
+        if (!(solver && solver.solution_valid)) { stopPlay(); return; }
+        const ph = (parseFloat(phaseEl.value) || 0) + 10;
+        phaseEl.value = String(ph >= 360 ? ph - 360 : ph);
+        draw();
+        setTimeout(step, 60);
+    };
+    if (playBtn) playBtn.addEventListener('click', () => {
+        if (playing) { stopPlay(); return; }
+        const disp = document.getElementById('plot-field-display');
+        if (disp && disp.value !== 'inst') { disp.value = 'inst'; resetFieldScales(); }
+        playing = true;
+        playBtn.innerHTML = '&#9632;';
+        step();
+    });
+    updateFieldControls();
 
     // Copy link button
     const copyLinkBtn = document.getElementById('copy-link-btn');
@@ -2555,6 +2566,35 @@ function bindEvents() {
     // Scale dialog event listeners
     setupScaleDialog();
 }
+
+
+// Visibility and units of the field-view controls: the load impedance and the distance
+// only with a termination, the unit of the excitation value, the voltage between
+// conductors only for a differential pair, a waveguide only by power.
+function updateFieldControls() {
+    const kindEl = document.getElementById('plot-exc-kind');
+    const load = document.getElementById('plot-sw-load');
+    const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+    const isWG = !!(solver && solver.mode_type === 'waveguide');
+    const isDiff = !!(solver && solver.is_differential);
+    if (kindEl) {
+        for (const opt of kindEl.options) {
+            opt.disabled = (isWG && opt.value !== 'P') || (opt.value === 'Vd' && !isDiff);
+        }
+        if (kindEl.selectedOptions[0] && kindEl.selectedOptions[0].disabled) kindEl.value = isWG ? 'P' : 'V';
+        const unit = document.getElementById('plot-exc-unit');
+        if (unit) unit.textContent = { V: 'V', Vd: 'V', I: 'A', P: 'W' }[kindEl.value] || 'V';
+        const rms = document.getElementById('plot-exc-rms');
+        if (rms) rms.disabled = kindEl.value === 'P';
+    }
+    if (load) {
+        for (const opt of load.options) opt.disabled = isWG && opt.value !== 'matched';
+        if (isWG) load.value = 'matched';
+        show('plot-sw-zl-group', load.value === 'custom');
+        show('plot-sw-pos-group', load.value !== 'matched');
+    }
+}
+window.updateFieldControls = updateFieldControls;
 
 // --- Scale Dialog Management ---
 

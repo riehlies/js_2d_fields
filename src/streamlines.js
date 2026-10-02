@@ -1,523 +1,184 @@
-import { shapeContains, distToShapeBoundary, segShapeBoundaryHit,
-         shapePerimeter, shapePerimeterPoint } from './shapes.js';
+// MODIFIED 2026-10-02 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
+// rewritten. Field lines now start at points spaced by equal electric FLUX (D = εE, so each
+// line carries the same charge), cover all signal conductors with one budget, are traced
+// with an adaptive RK4 step on a binary-search grid sampler, stop in field-free regions
+// instead of drifting, and lines between two signal conductors are drawn once.
+// See FORK_CHANGES.md for the full list of changes.
+//
+// Electric field lines of a quasi-TEM cross-section.
+//
+// Seeding: the boundary of every signal conductor is sampled densely, each sample
+// weighted by the flux density |ε·E·n| leaving or entering the metal there (the surface
+// charge, Gauss). One cumulative distribution over all signal conductors is split into
+// n equal parts and a line starts at the midpoint of each part, so every line carries
+// the same flux and the line density anywhere is proportional to |D|. The start
+// direction follows the sign of E·n: away from the conductor along +E where the charge
+// is positive, along −E where it is negative.
+//
+// A line between two signal conductors (odd mode) is found from both ends. The copy
+// traced from the negatively charged end is dropped, its partner from the positive end
+// carries the same flux.
+import { shapeContains, distToShapeBoundary, shapePerimeter, shapePerimeterPoint,
+         isComplement } from './shapes.js';
 
-// NOTE ON SHAPED CONDUCTORS (coax): every helper below was written for axis-aligned
-// rectangles. A shaped conductor's bounding box is not its body. A coax shield's spans
-// the whole domain, so a bbox test would report every point as inside metal and kill
-// each streamline at its seed. Shaped conductors therefore route through shapeContains /
-// distToShapeBoundary / segShapeBoundaryHit.
-function isInsideConductor(x, y, conductors) {
-    for (const c of conductors) {
-        if (c.shape) {
-            if (shapeContains(c, x, y, 0)) return true;
-            continue;
-        }
-        if (
-            x >= c.x_min &&
-            x <= c.x_max &&
-            y >= c.y_min &&
-            y <= c.y_max
-        ) {
-            return true;
-        }
+function inMetal(conductors, x, y) {
+    for (let k = 0; k < conductors.length; k++) {
+        if (shapeContains(conductors[k], x, y, 0)) return k;
     }
-    return false;
+    return -1;
 }
 
-function findConductorIntersection(x1, y1, x2, y2, conductors) {
-    // Check if line segment from (x1,y1) to (x2,y2) crosses into a conductor
-    // Returns the closest intersection point if multiple exist
-    
-    let closestHit = null;
-    let closestT = Infinity;
-    
-    for (const c of conductors) {
-        if (c.shape) {
-            const hit = segShapeBoundaryHit(x1, y1, x2, y2, c);
-            if (hit) {
-                const t = Math.hypot(hit.x - x1, hit.y - y1) / (Math.hypot(x2 - x1, y2 - y1) || 1);
-                if (t < closestT) { closestT = t; closestHit = hit; }
-            }
-            continue;
-        }
-        // Check top edge (entering from above)
-        if (y1 >= c.y_max && y2 < c.y_max) {
-            const t = (c.y_max - y1) / (y2 - y1);
-            const xHit = x1 + t * (x2 - x1);
-            if (xHit >= c.x_min && xHit <= c.x_max && t < closestT) {
-                closestT = t;
-                closestHit = { x: xHit, y: c.y_max, conductor: c };
-            }
-        }
-        
-        // Check bottom edge (entering from below)
-        if (y1 <= c.y_min && y2 > c.y_min) {
-            const t = (c.y_min - y1) / (y2 - y1);
-            const xHit = x1 + t * (x2 - x1);
-            if (xHit >= c.x_min && xHit <= c.x_max && t < closestT) {
-                closestT = t;
-                closestHit = { x: xHit, y: c.y_min, conductor: c };
-            }
-        }
-        
-        // Check left edge (entering from the left)
-        if (x1 <= c.x_min && x2 > c.x_min) {
-            const t = (c.x_min - x1) / (x2 - x1);
-            const yHit = y1 + t * (y2 - y1);
-            if (yHit >= c.y_min && yHit <= c.y_max && t < closestT) {
-                closestT = t;
-                closestHit = { x: c.x_min, y: yHit, conductor: c };
-            }
-        }
-        
-        // Check right edge (entering from the right)
-        if (x1 >= c.x_max && x2 < c.x_max) {
-            const t = (c.x_max - x1) / (x2 - x1);
-            const yHit = y1 + t * (y2 - y1);
-            if (yHit >= c.y_min && yHit <= c.y_max && t < closestT) {
-                closestT = t;
-                closestHit = { x: c.x_max, y: yHit, conductor: c };
-            }
-        }
-    }
-    
-    return closestHit;
+function distToMetal(conductors, x, y) {
+    let d = Infinity;
+    for (const c of conductors) d = Math.min(d, distToShapeBoundary(c, x, y));
+    return d;
 }
 
-function distToConductor(x, y, conductors) {
-    let minDist = Infinity;
-    for (const c of conductors) {
-        if (c.shape) { minDist = Math.min(minDist, distToShapeBoundary(c, x, y)); continue; }
-        // Distance to nearest edge
-        const dx = Math.max(c.x_min - x, 0, x - c.x_max);
-        const dy = Math.max(c.y_min - y, 0, y - c.y_max);
-        minDist = Math.min(minDist, Math.hypot(dx, dy));
-    }
-    return minDist;
-}
-
-function generateConductorSeedsWeighted(
-    conductors, spacing,
-    xArr, yArr, Ex, Ey,
-    numStreamlines = null,
-    mode = 'odd',
-    edgeOffset = 1e-7
-) {
-    const seeds = [];
-    const eps = 1e-12;
-
-    // Calculate total perimeter of all signal conductors for proportional distribution
-    let totalPerimeter = 0;
-    const signalConductors = conductors.filter(c => c.is_signal);
-    for (const c of signalConductors) {
-        totalPerimeter += c.shape ? shapePerimeter(c) : 2 * (Math.abs(c.width) + Math.abs(c.height));
-    }
-
-    for (const c of conductors) {
-        if (!c.is_signal) continue;
-
-        // Rect extents: an embedded trace has a negative height, and the seed
-        // walks below run from y_min upward.
-        const width = Math.abs(c.width);
-        const height = Math.abs(c.height);
-        const polarity = mode === 'odd' ? c.polarity : 1;
-        const perimeter = c.shape ? shapePerimeter(c) : 2 * (width + height);
-
-        // Calculate sample counts based on dimensions
-        const nSamplesH = Math.max(50, Math.floor(width / spacing) * 4);
-        const nSamplesV = Math.max(50, Math.floor(height / spacing) * 4);
-
-        // Seed counts: use configurable total or fall back to spacing-based
-        let nSeedsH, nSeedsV;
-        if (numStreamlines !== null) {
-            // Distribute streamlines proportionally to this conductor's perimeter
-            const conductorShare = Math.round(numStreamlines * (perimeter / totalPerimeter));
-            // Split between horizontal and vertical edges by their length ratio
-            const hShare = width / (width + height);
-            nSeedsH = Math.max(1, Math.round(conductorShare * hShare / 2));
-            nSeedsV = Math.max(1, Math.round(conductorShare * (1 - hShare) / 2));
-        } else {
-            nSeedsH = Math.max(10, Math.floor(width / spacing));
-            nSeedsV = Math.max(3, Math.floor(height / spacing));
-        }
-
-        // A curved conductor has one continuous boundary instead of four flat faces, so
-        // it becomes a single "edge" walked by arc length, with the seed weight taken
-        // from the local normal field |E.n| (the flat faces below can use a fixed axis
-        // component because their normal is constant).
-        const edges = c.shape ? [{
-            length: perimeter,
-            sample: (t) => {
-                const p = shapePerimeterPoint(c, t);
-                return { x: p.x + p.nx * edgeOffset, y: p.y + p.ny * edgeOffset, nx: p.nx, ny: p.ny };
-            },
-            nSamples: Math.max(50, Math.floor(perimeter / spacing) * 4),
-            nSeeds: numStreamlines !== null
-                ? Math.max(4, Math.round(numStreamlines * (perimeter / totalPerimeter)))
-                : Math.max(12, Math.floor(perimeter / spacing)),
-            getField: (f, pos) => Math.abs(f.ex * pos.nx + f.ey * pos.ny),
-        }] : [
-            // Horizontal edges (top and bottom)
-            {
-                length: width,
-                sample: (t) => ({ x: c.x_min + t * width, y: c.y_max + edgeOffset }),
-                nSamples: nSamplesH,
-                nSeeds: nSeedsH,
-                getField: (f) => Math.abs(f.ey)
-            },
-            {
-                length: width,
-                sample: (t) => ({ x: c.x_min + t * width, y: c.y_min - edgeOffset }),
-                nSamples: nSamplesH,
-                nSeeds: nSeedsH,
-                getField: (f) => Math.abs(f.ey)
-            },
-            // Vertical edges (left and right)
-            {
-                length: height,
-                sample: (t) => ({ x: c.x_min - edgeOffset, y: c.y_min + t * height }),
-                nSamples: nSamplesV,
-                nSeeds: nSeedsV,
-                getField: (f) => Math.abs(f.ex)
-            },
-            {
-                length: height,
-                sample: (t) => ({ x: c.x_max + edgeOffset, y: c.y_min + t * height }),
-                nSamples: nSamplesV,
-                nSeeds: nSeedsV,
-                getField: (f) => Math.abs(f.ex)
-            }
-        ];
-
-        // First pass: calculate flux for all edges to find maximum
-        const edgeData = [];
-        let maxFlux = 0;
-
-        for (const edge of edges) {
-            const positions = [];
-            const w = [];
-
-            for (let i = 0; i < edge.nSamples; i++) {
-                const t = i / (edge.nSamples - 1);
-                const pos = edge.sample(t);
-                positions.push(pos);
-
-                const f = sampleField(pos.x, pos.y, xArr, yArr, Ex, Ey, conductors);
-                if (!f) {
-                    w.push(eps);
-                } else {
-                    // Normal field component (pos carries the local normal for curves)
-                    w.push(edge.getField(f, pos) + eps);
-                }
-            }
-
-            const sum = w.reduce((a, b) => a + b, 0);
-            maxFlux = Math.max(maxFlux, sum);
-
-            edgeData.push({ edge, positions, w, sum });
-        }
-
-        // Second pass: generate seeds from edges with significant flux
-        for (const { edge, positions, w, sum } of edgeData) {
-            // Skip edge if flux is negligible compared to maximum
-            // Use relative threshold: 0.1% of max flux, or absolute minimum
-            const threshold = Math.max(eps * edge.nSamples, maxFlux * 0.001);
-            if (sum < threshold) continue;
-
-            // Build CDF
-            const C = [];
-            let cdfSum = 0;
-            for (let i = 0; i < w.length; i++) {
-                cdfSum += w[i];
-                C.push(cdfSum);
-            }
-
-            // Uniform sampling in CDF space
-            for (let k = 0; k <= edge.nSeeds; k++) {
-                const target = (k / edge.nSeeds) * sum;
-                let i = C.findIndex(v => v >= target);
-                if (i < 0) i = C.length - 1;
-
-                // Store seed with polarity info for direction control
-                seeds.push({
-                    x: positions[i].x,
-                    y: positions[i].y,
-                    polarity: polarity
-                });
-            }
-        }
-    }
-
-    return seeds;
-}
-
-function makeStreamlineTraceFromConductors(
-    Ex, Ey,
-    xSolver, ySolver,
-    conductors,
-    numStreamlines = null,
-    mode = 'odd'
-) {
-    const xLines = [];
-    const yLines = [];
-
-    const spacing = 0.5 * (xSolver[xSolver.length - 1] - xSolver[0]) / xSolver.length;
-    const ds = spacing / 2;
-    const maxSteps = 800;
-
-    const seeds = generateConductorSeedsWeighted(
-        conductors, spacing,
-        xSolver, ySolver,
-        Ex, Ey,
-        numStreamlines,
-        mode
-    );
-
-    for (const seed of seeds) {
-        const line = traceStreamline(
-            seed.x, seed.y,
-            xSolver, ySolver,
-            Ex, Ey,
-            ds, maxSteps,
-            conductors,
-            seed.polarity
-        );
-
-        if (line.length < 2) continue;
-
-        xLines.push(line[0][0] * 1000);
-        yLines.push(line[0][1] * 1000);
-
-        for (let k = 1; k < line.length; k++) {
-            xLines.push(line[k][0] * 1000);
-            yLines.push(line[k][1] * 1000);
-        }
-
-        xLines.push(null);
-        yLines.push(null);
-    }
-
-    return {
-        type: "scatter",
-        mode: "lines",
-        x: xLines,
-        y: yLines,
-        line: { width: 1, color: "black" },
-        hoverinfo: "skip",
-        name: "E-field lines"
+// Bilinear field sampler on a rectilinear grid, index lookup by binary search.
+function gridSampler(xs, ys, Ex, Ey) {
+    const nx = xs.length, ny = ys.length;
+    const find = (arr, n, v) => {
+        let lo = 0, hi = n - 1;
+        while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (arr[mid] <= v) lo = mid; else hi = mid; }
+        return lo;
+    };
+    return (x, y) => {
+        if (!(x >= xs[0] && x <= xs[nx - 1] && y >= ys[0] && y <= ys[ny - 1])) return null;
+        const i = find(xs, nx, x), j = find(ys, ny, y);
+        const tx = (x - xs[i]) / ((xs[i + 1] - xs[i]) || 1), ty = (y - ys[j]) / ((ys[j + 1] - ys[j]) || 1);
+        const bl = (A) => (A[j][i] * (1 - tx) + A[j][i + 1] * tx) * (1 - ty)
+                        + (A[j + 1][i] * (1 - tx) + A[j + 1][i + 1] * tx) * ty;
+        return { ex: bl(Ex), ey: bl(Ey) };
     };
 }
 
-function sampleV(x, y, xArr, yArr, V) {
-    // Find surrounding indices
-    let i = yArr.findIndex(v => v > y) - 1;
-    let j = xArr.findIndex(v => v > x) - 1;
-
-    if (i < 0 || j < 0 || i >= yArr.length - 1 || j >= xArr.length - 1) {
-        return null;
+// Boundary samples of one conductor: points just outside the surface with the outward
+// normal. Rectangles walk their four faces, round conductors their perimeter.
+function boundarySamples(c, n, offset) {
+    const out = [];
+    if (c.shape) {
+        for (let k = 0; k < n; k++) {
+            const p = shapePerimeterPoint(c, (k + 0.5) / n);
+            out.push({ x: p.x + p.nx * offset, y: p.y + p.ny * offset, nx: p.nx, ny: p.ny,
+                       ds: shapePerimeter(c) / n });
+        }
+        return out;
     }
-
-    const x1 = xArr[j], x2 = xArr[j + 1];
-    const y1 = yArr[i], y2 = yArr[i + 1];
-
-    const tx = (x - x1) / (x2 - x1);
-    const ty = (y - y1) / (y2 - y1);
-
-    function lerp(a, b, t) {
-        return a * (1 - t) + b * t;
+    const x0 = Math.min(c.x_min, c.x_max), x1 = Math.max(c.x_min, c.x_max);
+    const y0 = Math.min(c.y_min, c.y_max), y1 = Math.max(c.y_min, c.y_max);
+    const w = x1 - x0, h = y1 - y0, per = 2 * (w + h);
+    const faces = [
+        { len: w, at: (t) => [x0 + t * w, y1 + offset], nx: 0, ny: 1 },
+        { len: h, at: (t) => [x1 + offset, y1 - t * h], nx: 1, ny: 0 },
+        { len: w, at: (t) => [x1 - t * w, y0 - offset], nx: 0, ny: -1 },
+        { len: h, at: (t) => [x0 - offset, y0 + t * h], nx: -1, ny: 0 },
+    ];
+    for (const f of faces) {
+        const m = Math.max(2, Math.round(n * f.len / per));
+        for (let k = 0; k < m; k++) {
+            const [x, y] = f.at((k + 0.5) / m);
+            out.push({ x, y, nx: f.nx, ny: f.ny, ds: f.len / m });
+        }
     }
-
-    const v =
-        lerp(
-            lerp(V[i][j], V[i][j + 1], tx),
-            lerp(V[i + 1][j], V[i + 1][j + 1], tx),
-            ty
-        );
-    return v;
+    return out;
 }
 
-function sampleField(x, y, xArr, yArr, Ex, Ey, conductors) {
-    if (isInsideConductor(x, y, conductors)) return null;
+/**
+ * Field lines of E from the signal conductors.
+ *
+ * @param {object} o
+ * @param {Array<Float64Array>} o.Ex, o.Ey  field on the grid, [ny][nx]
+ * @param {ArrayLike<number>} o.x, o.y      grid coordinates (m)
+ * @param {Array} o.conductors              all conductors (signal ones carry is_signal)
+ * @param {function} o.epsAt                (x, y) → relative permittivity
+ * @param {number} o.n                      number of lines (equal flux each)
+ * @returns {{x: Array<number|null>, y: Array<number|null>}} polylines in mm
+ */
+export function electricFieldLines({ Ex, Ey, x, y, conductors, epsAt, n }) {
+    const X = [], Y = [];
+    if (!(n > 0) || !Ex || !Ey) return { x: X, y: Y };
+    const samp = gridSampler(x, y, Ex, Ey);
+    const nx = x.length, ny = y.length;
+    const W = x[nx - 1] - x[0], H = y[ny - 1] - y[0], diag = Math.hypot(W, H);
+    // A complement (coax shield) is never a source, but it is metal a line ends on.
+    const metal = conductors;
+    const signal = conductors.filter(c => c.is_signal && !(c.shape && isComplement(c.shape)));
+    if (!signal.length) return { x: X, y: Y };
+    const offset = 1e-4 * diag;
 
-    // Find surrounding indices
-    let i = yArr.findIndex(v => v > y) - 1;
-    let j = xArr.findIndex(v => v > x) - 1;
+    // Flux-weighted samples over all signal conductors.
+    const samples = [];
+    let total = 0, eRef = 0;
+    signal.forEach((c) => {
+        for (const s of boundarySamples(c, 400, offset)) {
+            const f = samp(s.x, s.y);
+            if (!f) continue;
+            const en = f.ex * s.nx + f.ey * s.ny;
+            const flux = Math.abs(en) * (epsAt ? epsAt(s.x, s.y) : 1) * s.ds;
+            if (!(flux > 0)) continue;
+            eRef = Math.max(eRef, Math.hypot(f.ex, f.ey));
+            total += flux;
+            samples.push({ ...s, cum: total, dir: en >= 0 ? 1 : -1, cond: c });
+        }
+    });
+    if (!(total > 0)) return { x: X, y: Y };
 
-    if (i < 0 || j < 0 || i >= yArr.length - 1 || j >= xArr.length - 1) {
-        return null;
+    const dsMax = diag / 250, dsMin = diag / 1e5;
+    const eStop = 1e-5 * eRef;
+    let si = 0;
+    for (let k = 0; k < n; k++) {
+        const target = (k + 0.5) / n * total;
+        while (si < samples.length - 1 && samples[si].cum < target) si++;
+        const s = samples[si];
+        const line = traceLine(s, samp, metal, dsMin, dsMax, eStop, 4 * diag, offset);
+        // Odd mode: drop the copy found from the negative end of a line that joins two
+        // signal conductors.
+        if (s.dir < 0 && line.end && line.end.is_signal) continue;
+        if (line.pts.length < 2) continue;
+        for (const [px, py] of line.pts) { X.push(px * 1000); Y.push(py * 1000); }
+        X.push(null); Y.push(null);
     }
-
-    const x1 = xArr[j], x2 = xArr[j + 1];
-    const y1 = yArr[i], y2 = yArr[i + 1];
-
-    const tx = (x - x1) / (x2 - x1);
-    const ty = (y - y1) / (y2 - y1);
-
-    function lerp(a, b, t) {
-        return a * (1 - t) + b * t;
-    }
-
-    const ex =
-        lerp(
-            lerp(Ex[i][j], Ex[i][j + 1], tx),
-            lerp(Ex[i + 1][j], Ex[i + 1][j + 1], tx),
-            ty
-        );
-
-    const ey =
-        lerp(
-            lerp(Ey[i][j], Ey[i][j + 1], tx),
-            lerp(Ey[i + 1][j], Ey[i + 1][j + 1], tx),
-            ty
-        );
-
-    return { ex, ey };
+    return { x: X, y: Y };
 }
 
-function snapToNormal(x, y, conductors, f) {
-    if (!f) return null;
-
-    for (const c of conductors) {
-        const tol = 1e-7;
-
-        // Top edge
-        if (Math.abs(y - c.y_max) < tol && x >= c.x_min && x <= c.x_max) {
-            return { ex: 0, ey: Math.abs(f.ey) > 1e-12 ? Math.sign(f.ey) : 1 };
-        }
-        // Bottom edge
-        if (Math.abs(y - c.y_min) < tol && x >= c.x_min && x <= c.x_max) {
-            return { ex: 0, ey: Math.abs(f.ey) > 1e-12 ? Math.sign(f.ey) : -1 };
-        }
-        // Right edge
-        if (Math.abs(x - c.x_max) < tol && y >= c.y_min && y <= c.y_max) {
-            return { ex: Math.abs(f.ex) > 1e-12 ? Math.sign(f.ex) : 1, ey: 0 };
-        }
-        // Left edge
-        if (Math.abs(x - c.x_min) < tol && y >= c.y_min && y <= c.y_max) {
-            return { ex: Math.abs(f.ex) > 1e-12 ? Math.sign(f.ex) : -1, ey: 0 };
-        }
-    }
-    return f;
-}
-
-function backtrackToConductor(x0, y0, xArr, yArr, Ex, Ey, ds, conductors, direction = -1) {
-    // Trace to find conductor surface
-    // direction = -1: backwards (against E-field) for positive polarity
-    // direction = +1: forwards (with E-field) for negative polarity
-    const maxSteps = 100;
-    const points = [[x0, y0]];
-    let x = x0;
-    let y = y0;
-
-    for (let n = 0; n < maxSteps; n++) {
-        const f = sampleField(x, y, xArr, yArr, Ex, Ey, conductors);
-        if (!f) break;
-
+// RK4 along ±E/|E| from the seed until the line enters metal, leaves the grid, reaches
+// a field-free region or exceeds the length budget.
+function traceLine(seed, samp, metal, dsMin, dsMax, eStop, maxLen, offset) {
+    const dir = seed.dir;
+    // Start ON the surface (the seed sits `offset` outside it).
+    const pts = [[seed.x - seed.nx * offset, seed.y - seed.ny * offset], [seed.x, seed.y]];
+    let x = seed.x, y = seed.y, len = 0, end = null;
+    const unit = (px, py) => {
+        const f = samp(px, py);
+        if (!f) return null;
         const m = Math.hypot(f.ex, f.ey);
-        if (m === 0) break;
-
-        const dist = distToConductor(x, y, conductors);
-        const dsLocal = Math.min(ds, dist / 2); // Smaller steps near conductors
-
-        // Step in specified direction
-        const xNew = x + direction * dsLocal * f.ex / m;
-        const yNew = y + direction * dsLocal * f.ey / m;
-
-        // Check if we hit a conductor
-        const hit = findConductorIntersection(x, y, xNew, yNew, conductors);
-        if (hit) {
-            points.unshift([hit.x, hit.y]);
-            return points;
-        }
-
-        // Check if inside conductor (fallback)
-        if (isInsideConductor(xNew, yNew, conductors)) {
-            // Use current point as best approximation
-            return points;
-        }
-
-        points.unshift([xNew, yNew]);
-        x = xNew;
-        y = yNew;
-    }
-
-    return points;
-}
-
-function traceStreamline(x0, y0, xArr, yArr, Ex, Ey, ds, maxSteps, conductors, polarity = 1) {
-    // polarity > 0: trace with E-field (from + to -)
-    // polarity < 0: trace against E-field (from - to +), then reverse for display
-
-    // Direction multiplier: positive polarity traces forward, negative traces backward
-    const dir = polarity >= 0 ? 1 : -1;
-
-    // Backtrack direction is opposite of trace direction
-    const backtrackDir = -dir;
-
-    // First, backtrack to conductor surface
-    const backtrack = backtrackToConductor(x0, y0, xArr, yArr, Ex, Ey, ds / 2, conductors, backtrackDir);
-
-    // Start with backtracked points
-    const line = backtrack;
-
-    let x = x0;
-    let y = y0;
-
-    for (let n = 0; n < maxSteps; n++) {
-        if (isInsideConductor(x, y, conductors)) break;
-
-        const f1_init = sampleField(x, y, xArr, yArr, Ex, Ey, conductors);
-        const f1 = snapToNormal(x, y, conductors, f1_init);
-        if (!f1) break;
-
-        const m1 = Math.hypot(f1.ex, f1.ey);
-        if (m1 === 0) break;
-
-        // Apply direction multiplier
-        const k1x = dir * f1.ex / m1;
-        const k1y = dir * f1.ey / m1;
-
-        const dist = distToConductor(x, y, conductors);
-        const dsLocal = Math.min(ds, Math.max(dist / 2, ds / 10)); // Smaller steps near conductors
-
-        const f2 = sampleField(x + 0.5 * dsLocal * k1x, y + 0.5 * dsLocal * k1y, xArr, yArr, Ex, Ey, conductors);
-        if (!f2) break;
-        const m2 = Math.hypot(f2.ex, f2.ey);
-        if (m2 === 0) break;
-
-        const k2x = dir * f2.ex / m2;
-        const k2y = dir * f2.ey / m2;
-
-        const f3 = sampleField(x + 0.5 * dsLocal * k2x, y + 0.5 * dsLocal * k2y, xArr, yArr, Ex, Ey, conductors);
-        if (!f3) break;
-        const m3 = Math.hypot(f3.ex, f3.ey);
-        if (m3 === 0) break;
-        const k3x = dir * f3.ex / m3;
-        const k3y = dir * f3.ey / m3;
-
-        const f4 = sampleField(x + dsLocal * k3x, y + dsLocal * k3y, xArr, yArr, Ex, Ey, conductors);
-        if (!f4) break;
-        const m4 = Math.hypot(f4.ex, f4.ey);
-        if (m4 === 0) break;
-        const k4x = dir * f4.ex / m4;
-        const k4y = dir * f4.ey / m4;
-
-        const xNew = x + dsLocal * (k1x + 2*k2x + 2*k3x + k4x) / 6;
-        const yNew = y + dsLocal * (k1y + 2*k2y + 2*k3y + k4y) / 6;
-
-        // Check if we crossed into a conductor
-        const hit = findConductorIntersection(x, y, xNew, yNew, conductors);
-        if (hit) {
-            line.push([hit.x, hit.y]); // Terminate exactly at surface
+        if (!(m > eStop)) return null;
+        return [dir * f.ex / m, dir * f.ey / m];
+    };
+    for (let step = 0; step < 6000 && len < maxLen; step++) {
+        const d = distToMetal(metal, x, y);
+        const ds = Math.min(dsMax, Math.max(dsMin, 0.4 * d));
+        const k1 = unit(x, y); if (!k1) break;
+        const k2 = unit(x + 0.5 * ds * k1[0], y + 0.5 * ds * k1[1]); if (!k2) break;
+        const k3 = unit(x + 0.5 * ds * k2[0], y + 0.5 * ds * k2[1]); if (!k3) break;
+        const k4 = unit(x + ds * k3[0], y + ds * k3[1]); if (!k4) break;
+        const nx = x + ds * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]) / 6;
+        const ny = y + ds * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]) / 6;
+        const hit = inMetal(metal, nx, ny);
+        if (hit >= 0) {
+            // Bisect onto the surface and stop there.
+            let ax = x, ay = y, bx = nx, by = ny;
+            for (let it = 0; it < 30; it++) {
+                const mx = 0.5 * (ax + bx), my = 0.5 * (ay + by);
+                if (inMetal(metal, mx, my) >= 0) { bx = mx; by = my; } else { ax = mx; ay = my; }
+            }
+            pts.push([bx, by]);
+            end = metal[hit];
             break;
         }
-
-        x = xNew;
-        y = yNew;
-        line.push([x, y]);
+        len += Math.hypot(nx - x, ny - y);
+        x = nx; y = ny;
+        pts.push([x, y]);
     }
-
-    return line;
+    return { pts, end };
 }
-
-export { makeStreamlineTraceFromConductors };

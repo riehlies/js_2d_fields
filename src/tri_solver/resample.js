@@ -1,5 +1,7 @@
 // MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
-// buildLocator is exported (used by mqs_field.js).
+// buildLocator is exported (used by mqs_field.js). 2026-10-02: unmeshed conductor interiors
+// (round conductors) take the conductor potential and the E stencil no longer straddles a
+// curved surface, which removes |E| spikes of ~100x at the coax inner conductor.
 // See FORK_CHANGES.md for the full list of changes.
 //
 // Resample a triangular-mesh static FEM solution (P2 scalar potential) onto a
@@ -159,6 +161,30 @@ function evalPhi(phi, mesh, coeff, t, x, y) {
     return { V: val, Ex: -gx, Ey: -gy };
 }
 
+// Potential of every conductor rect (full-domain coordinates): the P2 solution at the
+// mesh vertex closest to its boundary, which is a Dirichlet node holding exactly the
+// conductor's potential. For a half-domain solve a conductor in the mirrored half takes
+// the value of its mirror image (negated for odd parity). Returns [{ c, v }].
+function condPotentials(mesh, phi, rects, parity) {
+    const { nodes, nNodes } = mesh;
+    const out = [];
+    for (const c of rects) {
+        let q = c, sign = 1;
+        if (parity && c.xmax <= 0) {
+            q = { ...c, xmin: -c.xmax, xmax: -c.xmin };
+            if (c.shape) q.shape = { ...c.shape, cx: -c.shape.cx };
+            if (parity === 'odd') sign = -1;
+        }
+        let best = Infinity, v = NaN;
+        for (let i = 0; i < nNodes; i++) {
+            const d = distToShapeBoundary(q, nodes[2 * i], nodes[2 * i + 1]);
+            if (d < best) { best = d; v = phi.phiVertex[i]; }
+        }
+        if (Number.isFinite(v)) out.push({ c, v: sign * v });
+    }
+    return out;
+}
+
 // Resample a static solution onto a regular grid spanning `domain`.
 // Returns { x:Float64Array(nx), y:Float64Array(ny), V, Ex, Ey } with V/Ex/Ey as
 // [ny][nx] arrays (row index = y, matching plot.js / streamlines.js). Points
@@ -215,8 +241,20 @@ export function resampleStatic(mesh, phi, domain, opts = {}) {
         const l2 = c[2][0] + c[2][1] * qx + c[2][2] * qy;
         return l0 * nodeH[tris[3 * t]] + l1 * nodeH[tris[3 * t + 1]] + l2 * nodeH[tris[3 * t + 2]];
     };
-    // Point sample of V anywhere in the (mirrored) domain; NaN outside the mesh.
+    // Conductor potentials for the unmeshed conductor interiors. A conductor is an
+    // equipotential, so its potential is the Dirichlet value of the mesh vertex closest
+    // to its boundary. Without this a sample inside an unmeshed conductor read 0 V, and a
+    // difference stencil next to a round signal conductor (whose interior is a mesh hole)
+    // saw a 1 V step over a few µm: |E| spikes of 100x the true surface field.
+    const condPots = condPotentials(mesh, phi, opts.rects || [], parity);
+    const metalPot = (qx, qy) => {
+        for (const cp of condPots) if (shapeContains(cp.c, qx, qy, 0)) return cp.v;
+        return NaN;
+    };
+    // Point sample of V anywhere in the (mirrored) domain; inside an unmeshed conductor
+    // its potential, NaN outside the mesh.
     const sampleV = (qx, qy) => {
+        const qx0 = qx;
         let s = 1;
         if (parity && qx < 0) {
             qx = -qx;
@@ -224,7 +262,7 @@ export function resampleStatic(mesh, phi, domain, opts = {}) {
         }
         let t = locate(qx + eps, qy + eps);
         if (t < 0) t = locate(qx, qy);
-        if (t < 0) return NaN;
+        if (t < 0) return metalPot(qx0, qy);
         return s * evalPhi(phi, mesh, coeffOf(t), t, qx, qy).V;
     };
     for (let j = 0; j < ny; j++) {
@@ -236,7 +274,12 @@ export function resampleStatic(mesh, phi, domain, opts = {}) {
             }
             let t = locate(qx + eps, y[j] + eps);
             if (t < 0) t = locate(qx, y[j]);   // domain edge: fall back to the exact point
-            if (t < 0) continue;
+            if (t < 0) {
+                // Unmeshed conductor interior: its own potential (E stays 0 there).
+                const vm = metalPot(x[i], y[j]);
+                if (Number.isFinite(vm)) V[j][i] = vm;
+                continue;
+            }
             const r = evalPhi(phi, mesh, coeffOf(t), t, qx, y[j]);
             V[j][i] = sV * r.V;
             hT[j][i] = sizeAt(t, qx, y[j]);
@@ -309,12 +352,17 @@ export function resampleStatic(mesh, phi, domain, opts = {}) {
                     // Curved conductor: clamp the baseline inside it as for a rect, but
                     // do NOT set up a mirror plane. The image-theory extension below is
                     // derived for a FLAT Dirichlet face and does not hold on a curved
-                    // one; near a coax surface the grid is mesh-quantile dense anyway,
-                    // so the plain non-uniform stencil is accurate there.
+                    // one. Outside it, the baseline is clamped to the distance to the
+                    // surface, so a stencil never straddles the surface and averages the
+                    // field with the metal plateau (near a coax surface the grid is
+                    // mesh-quantile dense, so the short stencil is still accurate).
+                    const d = distToShapeBoundary(c, px, py);
                     if (shapeContains(c, px, py, -tolC)) {
-                        const d = distToShapeBoundary(c, px, py);
                         bx = Math.min(bx, d); by = Math.min(by, d);
                         inside = true;
+                    } else if (d < Math.max(bx, by)) {
+                        const dm = Math.max(d, 0.51 * Math.min(dxl, dxr, dyd, dyu));
+                        bx = Math.min(bx, dm); by = Math.min(by, dm);
                     }
                     continue;
                 }

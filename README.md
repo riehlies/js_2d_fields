@@ -2,9 +2,12 @@
 
 > **Fork notice.** This is a modified version of
 > [js_2d_fields](https://github.com/Ttl/js_2d_fields) by Henrik Forstén.
-> It adds **|H| Field** and **Current J** views (magnetic field, field lines and
-> conductor current density from the eddy-current solve). Changes by David
-> Riehl, 2026-10-01, see [FORK_CHANGES.md](FORK_CHANGES.md). Licensed under the
+> It adds **|H| Field**, **Current J** and **Power flow S** views (magnetic
+> field, conductor current density from the eddy-current solve, Poynting
+> vector), E / H / S arrows, field lines and equipotentials, one excitation
+> (voltage, current or power) and an instantaneous time display for all field
+> views, and standing waves. Changes by David Riehl, 2026-10-01/02, see
+> [FORK_CHANGES.md](FORK_CHANGES.md). Licensed under the
 > GNU GPL v3 like the original. This version runs online at
 > https://advpcb.davidriehl.de/tl/field_solver.html (build the upload folder
 > with `node deploy/make_site.mjs`); the online version linked below is the
