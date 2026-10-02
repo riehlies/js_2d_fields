@@ -37,12 +37,23 @@ export const COLORSCALES = {
         [0.2510, '#3b528b'], [0.3137, '#33638d'], [0.3765, '#2c728e'], [0.4392, '#26828e'],
         [0.5020, '#21918c'], [0.5647, '#1fa088'], [0.6275, '#28ae80'], [0.6902, '#3fbc73'],
         [0.7529, '#5ec962'], [0.8157, '#84d44b'], [0.8784, '#addc30'], [0.9412, '#d8e219'], [1, '#fde725']],
-    Hot: [[0, 'rgb(0,0,0)'], [0.3, 'rgb(230,0,0)'], [0.6, 'rgb(255,210,0)'], [1, 'rgb(255,255,255)']],
-    Electric: [[0, 'rgb(0,0,0)'], [0.15, 'rgb(30,0,100)'], [0.4, 'rgb(120,0,100)'], [0.6, 'rgb(160,90,0)'],
-        [0.8, 'rgb(230,200,0)'], [1, 'rgb(255,250,220)']],
-    RdBu: [[0, 'rgb(5,10,172)'], [0.35, 'rgb(106,137,247)'], [0.5, 'rgb(190,190,190)'],
-        [0.6, 'rgb(220,170,132)'], [0.7, 'rgb(230,145,90)'], [1, 'rgb(178,10,28)']],
+    // matplotlib's perceptually uniform maps (also readable with colour-vision deficiency
+    // and in greyscale): Inferno for the current density, Magma for the power flow.
+    Inferno: [[0, '#000004'], [0.1, '#160b39'], [0.2, '#420a68'], [0.3, '#6a176e'], [0.4, '#932667'],
+        [0.5, '#bc3754'], [0.6, '#dd513a'], [0.7, '#f37819'], [0.8, '#fca50a'], [0.9, '#f6d746'], [1, '#fcffa4']],
+    Magma: [[0, '#000004'], [0.1, '#140e36'], [0.2, '#3b0f70'], [0.3, '#641a80'], [0.4, '#8c2981'],
+        [0.5, '#b73779'], [0.6, '#de4968'], [0.7, '#f7705c'], [0.8, '#fe9f6d'], [0.9, '#fecf92'], [1, '#fcfdbf']],
+    // Diverging, DARK at zero (after F. Crameri's "berlin"): blue = negative, red =
+    // positive, lightness grows with |value| on both sides. On the dark plot background a
+    // zero field stays dark instead of lighting up white, and blue / red stay apart for
+    // red-green colour-vision deficiency (the sign is also carried by the lightness
+    // symmetry, not by hue alone).
+    RdBu: [[0, '#9eb0ff'], [0.15, '#5aa2d9'], [0.3, '#2b6a8a'], [0.45, '#12222e'], [0.5, '#110d08'],
+        [0.55, '#2b1205'], [0.7, '#722a14'], [0.85, '#b25a46'], [1, '#ffadad']],
 };
+// Plotly colorscale for a scale name: the arrays above, so the heatmaps and the ring
+// views of the coax use identical colors.
+const cs = (name) => COLORSCALES[name] || name;
 function parseColor(col) {
     if (col[0] === '#') return [1, 3, 5].map(i => parseInt(col.slice(i, i + 2), 16));
     return col.match(/\d+/g).slice(0, 3).map(Number);
@@ -403,7 +414,7 @@ function coaxStaticView(env, isE) {
     }
     const traces = [...ringTraces(rings, vals, R, 0, 0, isE ? '|E|' : 'V', unit, scale, zmin, zmax, colorbar),
                     ...coaxLineTraces(env, false)];
-    return { traces, shapes, zMin: zmin, zMax: zmax, dataMin, dataMax, xMM: [-R, R], yMM: [-R, R],
+    return { traces, shapes, zMin: zmin, zMax: zmax, scaleLog: false, scaleUnit: unit, dataMin, dataMax, xMM: [-R, R], yMM: [-R, R],
              title: `${isE ? '|E|' : 'Potential'}${timeLabel(opt)} · closed form` };
 }
 
@@ -449,7 +460,7 @@ function waveguideEView(env) {
     const dataMin = zmin, dataMax = zmax;
     const ov = env.stored(env.view);
     if (ov) { zmin = ov.min; zmax = ov.max; }
-    const traces = [{ type: 'heatmap', zsmooth: 'best', x: xMM, y: yMM, z, zmin, zmax, colorscale: 'Viridis',
+    const traces = [{ type: 'heatmap', zsmooth: 'best', x: xMM, y: yMM, z, zmin, zmax, colorscale: cs('Viridis'),
         colorbar: { title: { text: 'V/m' }, len: 0.8 },
         hovertemplate: 'x: %{x:.3f} mm<br>y: %{y:.3f} mm<br>|E|: %{z:.3e} V/m<extra></extra>' }];
     if (opt.nContours > 0 && opt.contourKind === 'mag') {
@@ -457,7 +468,7 @@ function waveguideEView(env) {
             { line: LINE.equiLight, name: '|E| levels' }));
     }
     traces.push(...waveguideLineTraces(env, false));
-    return { traces, shapes: [], zMin: zmin, zMax: zmax, dataMin, dataMax, xMM, yMM,
+    return { traces, shapes: [], zMin: zmin, zMax: zmax, scaleLog: false, scaleUnit: 'V/m', dataMin, dataMax, xMM, yMM,
              title: `|E|${timeLabel(opt)} · ${f.mode}` };
 }
 
@@ -500,7 +511,7 @@ function staticView(env, isE) {
     const ov = env.stored(env.view);
     if (ov) { zmin = ov.min; zmax = ov.max; }
     const unit = isE ? 'V/m' : 'V';
-    const traces = [{ type: 'heatmap', zsmooth: 'best', x: xMM, y: yMM, z, zmin, zmax, colorscale: scale,
+    const traces = [{ type: 'heatmap', zsmooth: 'best', x: xMM, y: yMM, z, zmin, zmax, colorscale: cs(scale),
         colorbar: { title: { text: unit }, len: 0.8 },
         hovertemplate: `x: %{x:.3f} mm<br>y: %{y:.3f} mm<br>${isE ? '|E|' : 'V'}: %{z:.3e} ${unit}<extra></extra>` }];
     if (isE && opt.nContours > 0 && opt.contourKind === 'mag') {
@@ -508,7 +519,7 @@ function staticView(env, isE) {
     }
     traces.push(...staticLineTraces(env, false));
     const what = isE ? '|E|' : 'Potential';
-    return { traces, shapes: [], zMin: zmin, zMax: zmax, dataMin, dataMax, xMM, yMM,
+    return { traces, shapes: [], zMin: zmin, zMax: zmax, scaleLog: false, scaleUnit: unit, dataMin, dataMax, xMM, yMM,
              title: `${what}${timeLabel(opt)}` };
 }
 
@@ -578,7 +589,7 @@ function mqsView(env, isH) {
     const traces = [{
         type: 'heatmap', zsmooth: 'best', x: xMM, y: yMM, z, zmin, zmax, customdata: raw,
         // RdBu runs blue → red with increasing z: current in +z red, return current blue.
-        colorscale: signed ? 'RdBu' : (isH ? 'Viridis' : 'Hot'), reversescale: false, colorbar,
+        colorscale: cs(signed ? 'RdBu' : (isH ? 'Viridis' : 'Inferno')), reversescale: false, colorbar,
         hovertemplate: `x: %{x:.4f} mm<br>y: %{y:.4f} mm<br>${qty}: %{customdata:.3e} ${unit}<extra></extra>`,
     }];
     if (isH && opt.nLines > 0 && f.kind === 'wg' && !env.arrowsH) {
@@ -589,7 +600,7 @@ function mqsView(env, isH) {
     if (isH && opt.nLines > 0 && f.Ar) traces.push(...hFieldLines(env, cH, xMM, yMM));
     const per = f.kind === 'wg' ? ` · ${f.mode}` : (f.differential ? (f.mode === 'even' ? ' · even mode' : ' · odd mode') : '');
     const title = `${qty}${timeLabel(opt)}${per} · δ = ${formatLength(f.delta)}`;
-    return { traces, shapes: [], zMin: zmin, zMax: zmax, dataMin, dataMax, title, xMM, yMM };
+    return { traces, shapes: [], zMin: zmin, zMax: zmax, scaleLog: useLog, scaleUnit: unit, dataMin, dataMax, title, xMM, yMM };
 }
 
 // H field lines = contour lines of the vector potential A_z. Equal ΔA between lines, so
@@ -694,7 +705,7 @@ function coaxMqsView(env, isH) {
     const dataMin = zmin, dataMax = zmax;
     const ov = env.stored(env.view);
     if (ov) { zmin = ov.min; zmax = ov.max; }
-    const scale = signed ? 'RdBu' : (isH ? 'Viridis' : 'Hot');
+    const scale = signed ? 'RdBu' : (isH ? 'Viridis' : 'Inferno');
     const cxm = f.cx * 1000, cym = f.cy * 1000;
     const shapes = ringShapes(f.rings, z, scale, zmin, zmax, cxm, cym);
     // H field lines: circles at equal steps of A ∝ ln(b/r) (density ∝ |H|), thinning out
@@ -716,7 +727,7 @@ function coaxMqsView(env, isH) {
     const shown = vals.map(v => (v === null ? null : (isH ? v : v)));
     const traces = ringTraces(f.rings, shown, R, cxm, cym, qty, unit, scale, zmin, zmax, colorbar);
     const title = `${qty}${timeLabel(opt)} · δ = ${formatLength(f.delta)}`;
-    return { traces, shapes, zMin: zmin, zMax: zmax, dataMin, dataMax, title, xMM: [-R, R], yMM: [-R, R] };
+    return { traces, shapes, zMin: zmin, zMax: zmax, scaleLog: useLog, scaleUnit: unit, dataMin, dataMax, title, xMM: [-R, R], yMM: [-R, R] };
 }
 
 // ---- power flow --------------------------------------------------------------------
@@ -773,7 +784,9 @@ function powerView(env) {
     const avg = toMM(Sav), now = toMM(Sinst);
     const res = powerHeatmap(env, xMM, yMM, avg, now, percentile(envl, 0.99) * 1e-6);
     // Containment lines: S_z levels enclosing 50 / 90 / 99 % of the transmitted power.
-    if (opt.nContours > 0 && total > 0) res.traces.push(...containmentTraces(xMM, yMM, avg, cells, total));
+    // Containment lines of the transmitted power: not for a standing wave, whose average
+    // power flow is (nearly) zero.
+    if (opt.nContours > 0 && total > 0 && !ex.standing) res.traces.push(...containmentTraces(xMM, yMM, avg, cells, total));
     Object.assign(res, powerTitle(env, total, inDiel, solver));
     res.power = total;
     return res;
@@ -782,20 +795,36 @@ function powerView(env) {
 function powerHeatmap(env, xMM, yMM, avg, now, envMax) {
     const { opt } = env;
     const unit = 'W/mm²';
-    let z, zmin, zmax, scale, colorbar;
+    let z, zmin, zmax, scale, colorbar, scaleLog = false;
     if (opt.inst) {
-        // Instantaneous power density pulsates at 2ω (and reverses in a standing wave):
-        // a signed linear scale fixed to the envelope.
-        z = now; scale = 'RdBu'; zmin = -envMax; zmax = envMax;
-        colorbar = { title: { text: unit }, len: 0.8 };
+        // Instantaneous power density, linear scale fixed to the envelope. On a matched
+        // line E and H are in phase and S_z(t) = 2·S_avg·cos²(ωt) never goes negative:
+        // 0 … envelope. Only a standing wave reverses the power flow locally; then a
+        // signed scale (blue = towards the generator).
+        let mn = 0;
+        for (const row of now) for (const v of row) if (v !== null && v < mn) mn = v;
+        const signed = !!env.ex.standing || mn < -1e-3 * envMax;
+        scale = signed ? 'RdBu' : 'Magma';
+        if (!signed && opt.log) {
+            // Non-negative: the same logarithmic scale as the time average, fixed to the
+            // envelope (4 decades).
+            z = now.map(row => row.map(v => (v === null || v <= 0 ? null : Math.log10(v))));
+            zmax = Math.log10(Math.max(envMax, 1e-300)); zmin = zmax - 4; scaleLog = true;
+            colorbar = { title: { text: `log₁₀ ${unit}` }, len: 0.8, ...logTicks(zmin, zmax) };
+        } else {
+            z = now;
+            zmin = signed ? -envMax : 0; zmax = envMax;
+            colorbar = { title: { text: unit }, len: 0.8 };
+        }
     } else if (opt.log) {
+        scaleLog = true;
         z = avg.map(row => row.map(v => (v === null || v <= 0 ? null : Math.log10(v))));
         let hi = -Infinity;
         for (const row of z) for (const v of row) if (v !== null && v > hi) hi = v;
-        zmax = hi; zmin = hi - 4; scale = 'Electric';
+        zmax = hi; zmin = hi - 4; scale = 'Magma';
         colorbar = { title: { text: `log₁₀ ${unit}` }, len: 0.8, ...logTicks(zmin, zmax) };
     } else {
-        z = avg; scale = 'Electric'; zmin = 0;
+        z = avg; scale = 'Magma'; zmin = 0;
         const a = [];
         for (const row of avg) for (const v of row) if (v !== null && v > 0) a.push(v);
         zmax = percentile(a, 0.99);
@@ -806,9 +835,9 @@ function powerHeatmap(env, xMM, yMM, avg, now, envMax) {
     if (ov) { zmin = ov.min; zmax = ov.max; }
     const custom = opt.inst ? now : avg;
     const traces = [{ type: 'heatmap', zsmooth: 'best', x: xMM, y: yMM, z, zmin, zmax, customdata: custom,
-        colorscale: scale === 'Electric' ? COLORSCALES.Electric : 'RdBu', colorbar,
+        colorscale: cs(scale), colorbar,
         hovertemplate: `x: %{x:.4f} mm<br>y: %{y:.4f} mm<br>S_z: %{customdata:.3e} ${unit}<extra></extra>` }];
-    return { traces, shapes: [], zMin: zmin, zMax: zmax, dataMin, dataMax, xMM, yMM };
+    return { traces, shapes: [], zMin: zmin, zMax: zmax, scaleLog: scaleLog, scaleUnit: unit, dataMin, dataMax, xMM, yMM };
 }
 
 const CONTAIN = [[0.5, 'solid', '50 % of the power'], [0.9, 'dash', '90 % of the power'], [0.99, 'dot', '99 % of the power']];
@@ -869,13 +898,19 @@ function coaxPowerView(env) {
         ? Math.hypot(g.Hr, g.Hi) / (Math.sqrt(g.r0 * g.r1) * L) : 0))) * 1e-6;
     const vals = opt.inst ? now : avg;
     let zmin, zmax, scale;
-    const useLog = !opt.inst && opt.log;
-    const z = vals.map(v => (v === null ? null : (useLog ? Math.log10(Math.max(v, 1e-30)) : v)));
-    if (opt.inst) { zmin = -envMax; zmax = envMax; scale = 'RdBu'; }
-    else {
+    // Signed only where the power flow reverses (standing wave), see powerHeatmap.
+    const mnNow = opt.inst ? Math.min(0, ...now.filter(v => v !== null)) : 0;
+    const signedInst = opt.inst && (!!ex.standing || mnNow < -1e-3 * envMax);
+    const useLog = opt.log && !signedInst;
+    const z = vals.map(v => (v === null ? null : (useLog ? (v > 0 ? Math.log10(v) : null) : v)));
+    if (opt.inst) {
+        if (signedInst) { zmin = -envMax; zmax = envMax; scale = 'RdBu'; }
+        else if (useLog) { zmax = Math.log10(Math.max(envMax, 1e-300)); zmin = zmax - 4; scale = 'Magma'; }
+        else { zmin = 0; zmax = envMax; scale = 'Magma'; }
+    } else {
         let hi = -Infinity, lo = Infinity;
         for (const v of z) if (v !== null) { hi = Math.max(hi, v); lo = Math.min(lo, v); }
-        zmax = hi; zmin = useLog ? Math.max(lo, hi - 4) : 0; scale = 'Electric';
+        zmax = hi; zmin = useLog ? Math.max(lo, hi - 4) : 0; scale = 'Magma';
     }
     const dataMin = zmin, dataMax = zmax;
     const ov = env.stored(env.view);
@@ -887,8 +922,8 @@ function coaxPowerView(env) {
     const shapes = ringShapes(f.rings, z, scale, zmin, zmax, cxm, cym);
     const R = (f.b + f.tShield) * 1000;
     const traces = ringTraces(f.rings, vals, R, cxm, cym, 'S_z', unit, scale, zmin, zmax, colorbar);
-    // Containment circles: P(< r) ∝ ln(r/a) for the TEM coax.
-    if (opt.nContours > 0) {
+    // Containment circles: P(< r) ∝ ln(r/a) for the TEM coax (not for a standing wave).
+    if (opt.nContours > 0 && !ex.standing) {
         for (const [frac, dash, name] of CONTAIN) {
             const r = a * Math.pow(b / a, frac) * 1000;
             const X = [], Y = [];
@@ -897,7 +932,7 @@ function coaxPowerView(env) {
                 line: { color: 'rgba(120, 220, 255, 0.9)', width: 1.4, dash } });
         }
     }
-    return { traces, shapes, zMin: zmin, zMax: zmax, dataMin, dataMax, xMM: [-R, R], yMM: [-R, R],
+    return { traces, shapes, zMin: zmin, zMax: zmax, scaleLog: useLog, scaleUnit: unit, dataMin, dataMax, xMM: [-R, R], yMM: [-R, R],
              ...powerTitle(env, total, total, solver), power: total };
 }
 
@@ -1016,10 +1051,35 @@ export function geometryLines(env) {
     return staticLineTraces(env, true);
 }
 
+// A dark seam under every light line (field lines, equipotentials, power lines), so
+// they stay visible on the bright end of a color map.
+function addHalos(traces) {
+    const out = [];
+    for (const t of traces) {
+        const col = t && t.type === 'scatter' && t.mode === 'lines' && t.line && t.line.color;
+        const m = col && String(col).match(/\d+(\.\d+)?/g);
+        // Solid light lines only: a seam under a dotted line would turn it into a grey line.
+        const light = m && (Number(m[0]) + Number(m[1]) + Number(m[2])) / 3 > 170 && !/arrows/.test(t.name || '')
+            && !t.line.dash;
+        if (light) {
+            out.push({ type: 'scatter', mode: 'lines', x: t.x, y: t.y, hoverinfo: 'skip', showlegend: false,
+                       line: { color: 'rgba(0, 0, 0, 0.3)', width: (t.line.width || 1) + 1.0 } });
+        }
+        out.push(t);
+    }
+    return out;
+}
+
 // Builds a field view. Returns { traces, shapes, title, zMin, zMax, dataMin, dataMax,
 // xMM, yMM } or { pending: true } while the H / J data is being computed, or
 // { error } when the view is not available.
 export function buildFieldView(env) {
+    const v = buildFieldViewRaw(env);
+    if (v && v.traces) v.traces = addHalos(v.traces);
+    return v;
+}
+
+function buildFieldViewRaw(env) {
     const { view, solver, f } = env;
     if (!env.ex.ok) return { error: env.ex.note || 'Excitation not available' };
     if (view === 'potential' || view === 'efield') {

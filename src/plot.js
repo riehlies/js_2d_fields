@@ -23,6 +23,10 @@ let zMax = null;
 // Store actual data range (before any user scaling)
 let actualDataMin = null;
 let actualDataMax = null;
+// Color axis of the current field view: logarithmic (zMin / zMax are log10 values) and
+// its unit, for the scale dialog.
+let scaleLog = false;
+let scaleUnit = '';
 
 // Geometry view zoom constants
 const SIGNAL_CONDUCTOR_VIEW_FRACTION = 1/3;  // Signal conductors take up this fraction of X-axis view
@@ -232,7 +236,7 @@ function computeGeometryView(solver, maxY, fraction = SIGNAL_CONDUCTOR_VIEW_FRAC
 
 // Export functions to get/set scale range for current view
 function getScaleRange() {
-    return { min: zMin, max: zMax, view: currentView };
+    return { min: zMin, max: zMax, view: currentView, log: scaleLog, unit: scaleUnit };
 }
 
 // ---- H field / current density data --------------------------------------------------
@@ -530,6 +534,7 @@ function draw(resetZoom = false) {
     let traces = [];
     let xMM, yMM;
     let fieldView = null;   // result of buildFieldView for the field views
+    scaleLog = false; scaleUnit = '';
     const wg = isWaveguide(solver);
     const maxY = Math.max(
         solver.dielectrics.reduce((max, d) => Math.max(max, d.y_max), 0),
@@ -590,6 +595,7 @@ function draw(resetZoom = false) {
                 subtitle = env.ex.label + (fieldView.info ? ` · ${fieldView.info}` : '');
                 xMM = fieldView.xMM; yMM = fieldView.yMM;
                 zMin = fieldView.zMin; zMax = fieldView.zMax;
+                scaleLog = !!fieldView.scaleLog; scaleUnit = fieldView.scaleUnit || '';
                 actualDataMin = fieldView.dataMin; actualDataMax = fieldView.dataMax;
             }
         }
@@ -600,7 +606,7 @@ function draw(resetZoom = false) {
                           mode: "markers", marker: { size: 0, opacity: 0 }, showlegend: false, hoverinfo: "skip" });
         }
         const yTop = solver.y ? solver.y[solver.y.length - 1] : maxY;
-        if (view === 'hfield' || view === 'jfield' || view === 'sfield') {
+        if (view === 'hfield' || view === 'jfield') {
             // The field lives inside the metal too: outlines only.
             shapes.push(...outlineShapes(solver, Math.max(maxY, yTop)));
         } else if (view === 'potential') {

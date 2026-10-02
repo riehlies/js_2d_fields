@@ -2619,50 +2619,42 @@ function getViewType(view) {
     return 'geometry';
 }
 
+// The scale dialog shows real values in the unit of the view. Logarithmic color axes
+// (|H|, J, S) work in log10 internally: the dialog converts, so a power density of
+// 1e-4 W/mm² reads 0.0001 and not -4 (which looked like a negative power).
+const scaleDisp = {
+    toDisp: (v) => (getScaleRange().log ? Math.pow(10, v) : v),
+    fromDisp: (x) => (getScaleRange().log ? (x > 0 ? Math.log10(x) : null) : x),
+    fmt: (x) => (Number.isFinite(x) ? String(Number(x.toPrecision(4))) : ''),
+};
+
 function setupScaleDialog() {
     const zMinInput = document.getElementById("zMinInput");
     const zMaxInput = document.getElementById("zMaxInput");
     const zMinSlider = document.getElementById("zMinSlider");
     const zMaxSlider = document.getElementById("zMaxSlider");
-
-    if (zMinInput) {
-        zMinInput.addEventListener("input", () => {
-            const min = Number(zMinInput.value);
-            const max = Number(zMaxInput.value);
-            if (zMinSlider) zMinSlider.value = min;
-            updateScaleFromDialog();
-        });
-    }
-
-    if (zMaxInput) {
-        zMaxInput.addEventListener("input", () => {
-            const min = Number(zMinInput.value);
-            const max = Number(zMaxInput.value);
-            if (zMaxSlider) zMaxSlider.value = max;
-            updateScaleFromDialog();
-        });
-    }
-
-    if (zMinSlider) {
-        zMinSlider.addEventListener("input", (e) => {
-            zMinInput.value = Number(e.target.value).toFixed(2);
-            updateScaleFromDialog();
-        });
-    }
-
-    if (zMaxSlider) {
-        zMaxSlider.addEventListener("input", (e) => {
-            zMaxInput.value = Number(e.target.value).toFixed(2);
-            updateScaleFromDialog();
-        });
-    }
+    const fromInput = (inp, slider) => {
+        const v = scaleDisp.fromDisp(Number(inp.value));
+        if (v === null || !Number.isFinite(v)) return;
+        if (slider) slider.value = v;
+        updateScaleFromDialog();
+    };
+    const fromSlider = (slider, inp) => {
+        inp.value = scaleDisp.fmt(scaleDisp.toDisp(Number(slider.value)));
+        updateScaleFromDialog();
+    };
+    if (zMinInput) zMinInput.addEventListener("input", () => fromInput(zMinInput, zMinSlider));
+    if (zMaxInput) zMaxInput.addEventListener("input", () => fromInput(zMaxInput, zMaxSlider));
+    if (zMinSlider) zMinSlider.addEventListener("input", () => fromSlider(zMinSlider, zMinInput));
+    if (zMaxSlider) zMaxSlider.addEventListener("input", () => fromSlider(zMaxSlider, zMaxInput));
 }
 
 function updateScaleFromDialog() {
-    const min = Number(document.getElementById("zMinInput").value);
-    const max = Number(document.getElementById("zMaxInput").value);
+    const min = scaleDisp.fromDisp(Number(document.getElementById("zMinInput").value));
+    const max = scaleDisp.fromDisp(Number(document.getElementById("zMaxInput").value));
+    if (min === null || max === null || !Number.isFinite(min) || !Number.isFinite(max) || !(max > min)) return;
 
-    // Save to current view's scale
+    // Save to current view's scale (internal values: log10 for a logarithmic axis)
     const scaleInfo = getScaleRange();
     const viewType = getViewType(scaleInfo.view);
     scaleRanges[viewType].min = min;
@@ -2708,38 +2700,38 @@ function openScaleDialog() {
         scaleRanges[viewType].max = maxVal;
     }
 
-    document.getElementById("zMinInput").value = Number(minVal).toFixed(2);
-    document.getElementById("zMaxInput").value = Number(maxVal).toFixed(2);
+    document.getElementById("zMinInput").value = scaleDisp.fmt(scaleDisp.toDisp(minVal));
+    document.getElementById("zMaxInput").value = scaleDisp.fmt(scaleDisp.toDisp(maxVal));
+    const titleEl = document.getElementById("scaleDialogTitle");
+    if (titleEl) titleEl.textContent = `Field Scale${scaleInfo.unit ? ' (' + scaleInfo.unit + (scaleInfo.log ? ', log' : '') + ')' : ''}`;
 
     const minSlider = document.getElementById("zMinSlider");
     const maxSlider = document.getElementById("zMaxSlider");
 
-    // Determine slider bounds based on view type and actual data
+    // Slider bounds around the data range: two decades below and one above on a
+    // logarithmic axis, 1.5x the range on a linear one (both signs for signed data).
     let sliderMinBound, sliderMaxBound;
-
-    if (viewType === 'potential') {
-        // Potential has theoretical bounds: [-1,1] for differential, [0,1] for single-ended
-        // Check if differential odd mode by looking at whether actualMin is negative
-        const isPotentialOddMode = actualMin < -0.1;
-        sliderMinBound = isPotentialOddMode ? -1.0 : 0.0;
-        sliderMaxBound = 1.0;
+    if (scaleInfo.log) {
+        sliderMinBound = actualMin - 2;
+        sliderMaxBound = actualMax + 1;
     } else {
-        // For E-field and geometry, use 1.5x actual data range for margin
-        sliderMinBound = actualMin < -0.1 ? actualMin * 1.5 : 0.0;
-        sliderMaxBound = actualMax * 1.5;
+        sliderMinBound = actualMin < 0 ? actualMin * 1.5 : 0.0;
+        sliderMaxBound = actualMax > 0 ? actualMax * 1.5 : 0.0;
     }
+    sliderMinBound = Math.min(sliderMinBound, minVal);
+    sliderMaxBound = Math.max(sliderMaxBound, maxVal);
 
     if (minSlider) {
         minSlider.min = sliderMinBound;
-        minSlider.max = maxVal;
-        minSlider.step = (minSlider.max - minSlider.min) / 200;
+        minSlider.max = sliderMaxBound;
+        minSlider.step = (sliderMaxBound - sliderMinBound) / 400 || 'any';
         minSlider.value = minVal;
     }
 
     if (maxSlider) {
-        maxSlider.min = minVal;
+        maxSlider.min = sliderMinBound;
         maxSlider.max = sliderMaxBound;
-        maxSlider.step = (maxSlider.max - maxSlider.min) / 200;
+        maxSlider.step = (sliderMaxBound - sliderMinBound) / 400 || 'any';
         maxSlider.value = maxVal;
     }
 

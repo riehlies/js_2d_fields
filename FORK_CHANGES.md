@@ -137,6 +137,21 @@ Cross-check: for the default microstrip (εr = 4.4, ε<sub>eff</sub> = 3.229)
   contour traces re-contoured the whole grid with smoothing on every redraw,
   once per trace: a redraw of the power flow view took 1.3 s, of the |H| view
   0.55 s; now 0.1–0.15 s.
+- **Power flow S sign**: in a matched or lossy travelling wave S<sub>z</sub> is
+  positive everywhere, so the S view uses a one-sided scale (log in the
+  instantaneous display too). A signed scale is used only for a standing wave
+  or when S<sub>z</sub> really turns negative, where the instantaneous power
+  flows back and forth; the containment lines are then left out. The
+  conductors are drawn filled in the S view (no power flows inside).
+- **Scale dialog** (click on the color bar) shows the real values and the unit
+  also for log scales (it showed the log10 exponents).
+- **Color maps** reviewed for color-vision deficiency, all perceptually
+  uniform with lightness growing with the value: Viridis for potential, |E|,
+  |H|; Inferno for J; Magma for S; signed values (instantaneous display,
+  standing waves) use a diverging map that is dark at zero (after Crameri's
+  *berlin*), blue negative and red positive, so a zero field stays dark on the
+  dark background instead of lighting up white. Light solid field lines get a
+  thin dark seam for contrast on the light end of the maps.
 
 ### How the fields are computed
 
