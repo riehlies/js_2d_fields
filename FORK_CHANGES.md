@@ -111,8 +111,9 @@ lines*):
 - |H|: H field lines (contours of A<sub>z</sub>), no further contour lines:
   those of a magnetic scalar potential would run along the E field lines.
   Power flow: 50 / 90 / 99 % lines. Current J and Losses: no lines.
-- Equipotentials and the power-containment lines start hidden; a click on
-  their legend entry shows them. Legend clicks switch a line set together with
+- Field lines, equipotentials and the power-containment lines start hidden; a
+  click on their legend entry shows them (the coax H lines are now a line trace
+  as well, so the legend switches them too). Legend clicks switch a line set together with
   its dark contrast seam and are kept across redraws, views and scale changes
   (Plotly would reset them on every redraw).
 - Contour lines are computed with a marching-squares pass of our own

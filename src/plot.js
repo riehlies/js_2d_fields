@@ -502,10 +502,11 @@ function updateArrows() {
 }
 // Legend state: which line sets the user has shown or hidden by clicking the legend,
 // kept across redraws and views (Plotly.react would reset it). Keyed by legend group, or
-// the trace name. Equipotentials and the power-containment lines start hidden: they
-// are shown on request.
+// the trace name. Field lines, equipotentials and the power-containment lines start
+// hidden: they are shown on request.
 const legendVisibility = {};
-const hiddenByDefault = (key) => key === 'Equipotentials' || /% of the power$/.test(key);
+const hiddenByDefault = (key) => /^(Equipotentials|E field lines|H field lines|H field \(transverse\))$/.test(key)
+    || /% of the power$/.test(key);
 const legendKey = (t) => t.legendgroup || (t.showlegend ? t.name : null);
 function applyLegendVisibility(traces) {
     for (const t of traces) {

@@ -683,13 +683,17 @@ function coaxMqsView(env, isH) {
     const R = (f.b + f.tShield) * 1000;
     const qty = isH ? '|H|' : (signed ? 'Jz' : '|Jz|');
     const { shapes, traces } = ringView(f.rings, vals, ax, scale, R, cxm, cym, qty);
-    // H field lines: circles at equal steps of A ∝ ln(b/r) (density ∝ |H|).
-    if (isH) {
+    // H field lines: circles at equal steps of A ∝ ln(b/r) (density ∝ |H|). A line
+    // trace, not shapes, so the legend switches them like the other field lines.
+    if (isH && opt.nLines > 0) {
+        const X = [], Y = [];
         for (let k = 1; k <= opt.nLines; k++) {
             const rr = f.b * Math.pow(f.a / f.b, k / (opt.nLines + 1)) * 1000;
-            shapes.push({ type: 'circle', xref: 'x', yref: 'y', x0: cxm - rr, y0: cym - rr, x1: cxm + rr, y1: cym + rr,
-                line: { color: 'rgba(255, 255, 255, 0.55)', width: 1 }, fillcolor: 'rgba(0,0,0,0)', layer: 'above' });
+            for (let q = 0; q <= 180; q++) { const t = 2 * Math.PI * q / 180; X.push(cxm + rr * Math.cos(t)); Y.push(cym + rr * Math.sin(t)); }
+            X.push(null); Y.push(null);
         }
+        traces.push({ type: 'scatter', mode: 'lines', x: X, y: Y, hoverinfo: 'skip', name: 'H field lines',
+                      showlegend: true, line: { color: 'rgba(255, 255, 255, 0.55)', width: 1 } });
     }
     const what = signed ? 'Jz at the current maximum' : `${qty} (peak)`;
     return { traces, shapes, ...axisResult(ax), xMM: [-R, R], yMM: [-R, R],
