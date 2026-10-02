@@ -45,7 +45,7 @@ the odd / even mode of a differential pair sits apart on the right.
   ε<sub>eff</sub> = 3.229) 64.1 % of the power flows in the dielectric, close to
   the filling factor (ε<sub>eff</sub> − 1)/(εr − 1) = 65.6 %. On the matched
   line S<sub>z</sub> ≥ 0, the scale is one-sided (numerical noise below zero is
-  drawn as 0). The conductors are drawn filled (no power flows inside).
+  drawn as 0).
 - **Losses** (new): time-average loss density ½|J|²/σ in the metal and
   ½ωε<sub>0</sub>ε<sub>r</sub>tanδ|E|² in the dielectric, in W/mm³, log scale
   over five decades. The title gives the loss per unit length from the
@@ -136,10 +136,11 @@ bar) also shows real values and the unit.
   the arrows and the power flow); the coax views use the closed form.
 - Waveguide |E| from the closed-form mode scaled by the power (before the
   arbitrarily scaled eigenvector).
-- Conductors no longer cover arrows and lines: the conductor fill is drawn
-  below the traces with its outline (in the conductor color) on top. The
-  linear |E| color range ends at the area-weighted 99.99th percentile instead
-  of the singular corner value.
+- Conductors no longer cover arrows and lines: the field views draw only the
+  conductor outlines. In the |E| and power flow views (no field in the metal)
+  the conductors stay dark, the geometry view keeps the filled conductors below
+  the field lines. The linear |E| color range ends at the area-weighted
+  99.99th percentile instead of the singular corner value.
 
 **Removed for teaching (2026-10-02).** An intermediate version also had an
 instantaneous time display (phase ωt, ▶ animation) and line terminations

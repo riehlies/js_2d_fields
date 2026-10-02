@@ -652,17 +652,10 @@ function draw(resetZoom = false) {
                           mode: "markers", marker: { size: 0, opacity: 0 }, showlegend: false, hoverinfo: "skip" });
         }
         const yTop = solver.y ? solver.y[solver.y.length - 1] : maxY;
-        if (view === 'hfield' || view === 'jfield' || view === 'lossfield') {
-            // The field lives inside the metal too: outlines only.
-            shapes.push(...outlineShapes(solver, Math.max(maxY, yTop)));
-        } else if (view === 'potential') {
-            // The conductors carry their potential in the color map: outlines only.
-            shapes.push(...outlineShapes(solver, Math.max(maxY, yTop)));
-        } else {
-            shapes.push(...dielectricFillShapes(solver, Math.max(maxY, yTop), {
-                alpha: 0, airAlpha: 0, layer: 'above', lineColor: 'rgba(200, 200, 200, 0.3)' }));
-            shapes.push(...conductorLayerShapes(solver, Math.max(maxY, yTop)));
-        }
+        // Field views: conductor outlines only. H, J and the losses live inside the
+        // metal, the potential colors the conductors with their voltage, and |E| and S
+        // (zero in metal) leave it dark.
+        shapes.push(...outlineShapes(solver, Math.max(maxY, yTop)));
     }
 
     else {
