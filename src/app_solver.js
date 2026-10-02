@@ -2522,7 +2522,7 @@ function bindEvents() {
     };
     window.resetFieldScales = resetFieldScales;   // the log / linear menu of the plot
     const SCALE_IDS = ['plot-field-freq', 'plot-exc-kind', 'plot-exc-value', 'plot-exc-rms'];
-    for (const id of ['plot-streamlines', 'plot-contours', 'plot-contour-kind',
+    for (const id of ['plot-streamlines', 'plot-contours',
                       'plot-arrow-density', ...SCALE_IDS]) {
         const el = document.getElementById(id);
         if (!el) continue;

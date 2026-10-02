@@ -24,14 +24,13 @@
 //   field lines (count "Field lines"): E lines in the geometry, potential and |E| views,
 //       H lines (contours of the vector potential A_z) in the |H| view. Equal flux per line.
 //   contour lines (count "Contour lines"): equipotentials in the geometry, potential and
-//       |E| views, or magnitude levels of |E| when "Contours show" is set so; lines
-//       enclosing 50 / 90 / 99 % of the power in the power flow view.
+//       |E| views; lines enclosing 50 / 90 / 99 % of the power in the power flow view.
 //
 // `env` (built by plot.js from the solver and the sidebar):
 //   { solver, view, freq, ex, opt, E: {Ex, Ey}, V, epsAt, stored(view), f (H / J data),
 //     alpha: { c, d } (attenuation in Np/m at the field frequency, or null) }
 //   ex  = { ok, cE, cH, P, Pexp, label, waveguide, nCond, mode, note }
-//   opt = { log, nLines, nContours, contourKind }
+//   opt = { log, nLines, nContours }
 
 import { shapeContains, isComplement, svgRingPath } from './shapes.js';
 import { electricFieldLines } from './streamlines.js';
@@ -334,7 +333,7 @@ function staticLineTraces(env, dark) {
     const amp = cabs(ex.cE) || 1;
     const xMM = Array.from(xs, v => v * 1000), yMM = Array.from(ys, v => v * 1000);
     // Equipotentials in equal voltage steps.
-    if (opt.nContours > 0 && env.V && (opt.contourKind !== 'mag' || env.view === 'geometry' || env.view === 'potential')) {
+    if (opt.nContours > 0 && env.V) {
         const mask = metalMask(solver, xs, ys);
         let vmin = Infinity, vmax = -Infinity;
         for (let j = 0; j < ys.length; j++) for (let i = 0; i < xs.length; i++) {
@@ -411,7 +410,7 @@ function coaxLineTraces(env, dark) {
     const { solver, opt } = env;
     const out = [];
     const a = solver.a, b = solver.b;
-    if (opt.nContours > 0 && (opt.contourKind !== 'mag' || env.view !== 'efield')) {
+    if (opt.nContours > 0) {
         // V(r) ∝ ln(b/r): circles in equal voltage steps.
         const X = [], Y = [];
         for (let m = 1; m <= opt.nContours; m++) {
@@ -506,10 +505,6 @@ function waveguideEView(env) {
     const ax = colorAxis(env, { log: opt.log, top: peak, decades: 2, unit: 'V/m',
                                 vals: raw.flat().filter(v => v > 0) });
     const traces = [heatmap(xMM, yMM, raw, ax, 'Viridis', '|E|', 3)];
-    if (opt.nContours > 0 && opt.contourKind === 'mag') {
-        traces.push(...levelTraces(xMM, yMM, raw, peak / (opt.nContours + 1), peak,
-            { line: LINE.equiLight, name: '|E| levels' }));
-    }
     traces.push(...waveguideLineTraces(env, false));
     return { traces, shapes: [], ...axisResult(ax), xMM, yMM, title: `|E| (peak) · ${f.mode}` };
 }
@@ -550,23 +545,8 @@ function staticView(env, isE) {
         ax = colorAxis(env, { signed: true, top: amp * vmax, unit: 'V' });
     }
     const traces = [heatmap(xMM, yMM, raw, ax, isE ? 'Viridis' : 'Signed', isE ? '|E|' : 'V', 3)];
-    if (isE && opt.nContours > 0 && opt.contourKind === 'mag') {
-        traces.push(magnitudeContourTrace(xMM, yMM, raw, ax.log ? 10 ** ax.dataMax : ax.dataMax, opt.nContours));
-    }
     traces.push(...staticLineTraces(env, false));
     return { traces, shapes: [], ...axisResult(ax), xMM, yMM, title: isE ? '|E| (peak)' : 'Potential (peak)' };
-}
-
-// Log-spaced |E| levels over two decades below the top of the color scale (lines evenly
-// spaced instead of crowding at the singular corners).
-function magnitudeContourTrace(xMM, yMM, raw, eMax, n) {
-    const lo = Math.log10(Math.max(eMax * 1e-2, 1e-30)), hi = Math.log10(Math.max(eMax, 1e-30));
-    const size = (hi - lo) / n;
-    const levels = Array.from({ length: n }, (_, k) => lo + size / 2 + k * size);
-    const lz = raw.map(row => Array.from(row, v => (v === null || !(v > 0) ? null : Math.log10(v))));
-    const l = isoLines(xMM, yMM, lz, levels);
-    return { type: 'scatter', mode: 'lines', x: l.x, y: l.y, hoverinfo: 'skip',
-             line: { width: 1, color: 'rgba(255, 255, 255, 0.35)' }, name: '|E| levels', showlegend: true };
 }
 
 // ---- |H| and current density ---------------------------------------------------------

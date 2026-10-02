@@ -308,7 +308,6 @@ function readFieldOptions() {
         log: elVal('plot-field-scale') !== 'linear',
         nLines: count('plot-streamlines', 0),
         nContours: count('plot-contours', 0),
-        contourKind: elVal('plot-contour-kind') === 'mag' ? 'mag' : 'equi',
     };
 }
 

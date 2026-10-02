@@ -27,7 +27,7 @@ function check(name, ok, detail = '') {
 }
 
 const F = 1e9;
-const optBase = { log: true, nLines: 10, nContours: 10, contourKind: 'equi' };
+const optBase = { log: true, nLines: 10, nContours: 10 };
 const NP = 1 / 8.685889638065035;
 
 async function setup(s, f = F, maxNodes = 12000) {

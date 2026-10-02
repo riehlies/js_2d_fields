@@ -99,17 +99,18 @@ everywhere. E arrows next to a conductor are shortened so they do not reach into
 the metal. H and S need the Full-wave solver.
 
 **Field lines and contour lines** (Plot Options → *Field lines*, *Contour
-lines*, *Contours show*):
+lines*):
 
 - Geometry, Potential, |E|: electric field lines and equipotentials in equal
-  voltage steps (they cross at right angles); lines of equal |E| as the option
-  *|E| levels*. Field lines start at points of equal electric FLUX (weighted by
+  voltage steps (they cross at right angles). Before, the |E| view drew lines
+  of equal |E|, which look like equipotentials but are not. Field lines start at points of equal electric FLUX (weighted by
   ε·E<sub>n</sub>, the surface charge, over all signal conductors), so every
   line carries the same charge (before, conductor faces in the substrate got
   ε<sub>r</sub> times too few lines). A line between the two conductors of a pair
   is drawn once, lines stop in field-free regions.
-- |H|: H field lines (contours of A<sub>z</sub>). Power flow: 50 / 90 / 99 %
-  lines. Current J and Losses: no lines.
+- |H|: H field lines (contours of A<sub>z</sub>), no further contour lines:
+  those of a magnetic scalar potential would run along the E field lines.
+  Power flow: 50 / 90 / 99 % lines. Current J and Losses: no lines.
 - Contour lines are computed with a marching-squares pass of our own
   (`src/isolines.js`) and drawn as line traces: a redraw takes 0.1–0.15 s
   (with Plotly contour traces 0.55–1.3 s).
