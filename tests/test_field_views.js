@@ -8,14 +8,16 @@
 // eddy-current H (1 A) come from two different solves; scaled by V and I = V/Zc their
 // Poynting vector must carry exactly the power the excitation predicts:
 //   ∫ ½·Re(E × H*) dA = n·½·Re(V·I*)
-// for microstrip, a differential pair (odd and even), coax and waveguide. Also checks the
-// fixed scale of the instantaneous display and a standing wave.
+// for microstrip, a differential pair (odd and even), coax and waveguide. The loss view
+// must reproduce the solver's dielectric loss 2·α_d·P from its map (and for the coax the
+// conductor loss 2·α_c·P from the closed-form current). Also checks the color scales: the
+// potential symmetric around 0 V, |E| on a log scale, J with its sign on the linear one.
 import { MicrostripSolver } from '../src/microstrip.js';
 import { CoaxSolver } from '../src/coax.js';
 import { RectWaveguideSolver } from '../src/rect_waveguide.js';
 import { initTriBackend, TriBackend } from '../src/tri_solver/tri_backend.js';
 import { buildFieldView, dielectricAt } from '../src/field_views.js';
-import { excitation, reflection, standingWave, cmul, cconj } from '../src/field_excitation.js';
+import { excitation, cmul, cconj } from '../src/field_excitation.js';
 
 const ctx = await initTriBackend();
 let failures = 0;
@@ -25,7 +27,8 @@ function check(name, ok, detail = '') {
 }
 
 const F = 1e9;
-const optBase = { inst: false, wt: 0, phaseDeg: 0, log: true, nLines: 10, nContours: 10, contourKind: 'equi' };
+const optBase = { log: true, nLines: 10, nContours: 10, contourKind: 'equi' };
+const NP = 1 / 8.685889638065035;
 
 async function setup(s, f = F, maxNodes = 12000) {
     const tb = new TriBackend(ctx, s, { maxNodes });
@@ -44,7 +47,7 @@ function env(s, tb, res, view, modeIdx, exOpts, opt = optBase, f = F) {
     ex.Pexp = wg ? ex.P : ex.nCond * 0.5 * cmul(ex.cE, cconj(ex.cH)).re;
     const field = tb.mqsFieldAt(f, tb.modeNames[modeIdx] ?? tb.modeNames[0]);
     return {
-        solver: s, view, f: field, ex, opt, freq: f,
+        solver: s, view, f: field, ex, opt, freq: f, alpha: { c: m.alpha_c * NP, d: m.alpha_d * NP },
         E: { Ex: s.Ex && s.Ex[modeIdx], Ey: s.Ey && s.Ey[modeIdx] }, V: s.V && s.V[modeIdx],
         epsAt: (x, y) => dielectricAt(s, x, y), stored: () => null, arrowsH: false,
     };
@@ -67,21 +70,28 @@ const ms = { trace_width: 0.3e-3, substrate_height: 0.254e-3, trace_thickness: 3
     const { tb, res } = await setup(s);
     powerCheck('microstrip, 1 V', env(s, tb, res, 'sfield', 0, {}), 0.02);
     powerCheck('microstrip, 1 W', env(s, tb, res, 'sfield', 0, { kind: 'P', value: 1 }), 0.02);
-    // Instantaneous display: the scale stays that of the peak, the field follows cos ωt.
-    const pk = buildFieldView(env(s, tb, res, 'efield', 0, {}));
-    const at60 = buildFieldView(env(s, tb, res, 'efield', 0, {}, { ...optBase, inst: true, wt: Math.PI / 3, phaseDeg: 60 }));
-    const mx = (v) => { let m = 0; for (const row of v.traces[0].z) for (const z of row) if (z !== null && z > m) m = z; return m; };
-    check('instantaneous |E| at 60° is half the peak', Math.abs(mx(at60) / mx(pk) - 0.5) < 1e-6, `${(mx(at60) / mx(pk)).toFixed(4)}`);
-    check('instantaneous display keeps the peak color scale', at60.zMax === pk.zMax);
-    // Standing wave, open end, λ/8: E and H 90° apart, average power ≈ 0.
-    const m0 = res.modes[0];
-    const base = excitation({ kind: 'V', value: 1, Zc: m0.Zc });
-    const sw = standingWave(base.V, base.I, reflection('open', m0.Zc), 0.125);
-    const e = env(s, tb, res, 'sfield', 0, {});
-    e.ex = { ...e.ex, cE: sw.V, cH: sw.I, Pexp: 0.5 * cmul(sw.V, cconj(sw.I)).re };
-    const v = buildFieldView(e);
-    check('open end, λ/8: average power flow nearly zero', Math.abs(v.power) < 0.02 * base.P,
-          `${(v.power * 1e6).toFixed(2)} µW of ${(base.P * 1e3).toFixed(2)} mW incident`);
+    const pot = buildFieldView(env(s, tb, res, 'potential', 0, {}));
+    check('potential: symmetric scale around 0 V', pot.zMin === -pot.zMax && Math.abs(pot.zMax - 1) < 1e-6,
+          `${pot.zMin}…${pot.zMax}`);
+    const eLog = buildFieldView(env(s, tb, res, 'efield', 0, {}));
+    const eLin = buildFieldView(env(s, tb, res, 'efield', 0, {}, { ...optBase, log: false }));
+    const span = eLog.zMax - eLog.zMin;
+    check('|E|: log scale up to the linear top, at most three decades', eLog.scaleLog && !eLin.scaleLog
+          && Math.abs(10 ** eLog.zMax / eLin.zMax - 1) < 1e-9 && span <= 3 + 1e-9 && span >= 0.5, `${span.toFixed(2)} decades`);
+    const jLin = buildFieldView(env(s, tb, res, 'jfield', 0, {}, { ...optBase, log: false }));
+    let jPos = 0, jNeg = 0;
+    for (const row of jLin.traces[0].z) for (const v of row) { if (v > 0) jPos++; if (v < 0) jNeg++; }
+    check('J linear: signed, current and return current', jLin.zMin === -jLin.zMax && jPos > 0 && jNeg > 0
+          && /^Jz/.test(jLin.title), `${jPos} positive, ${jNeg} negative cells`);
+    // Losses: the dielectric part of the map against the solver.
+    const lv = buildFieldView(env(s, tb, res, 'lossfield', 0, {}));
+        const e0 = env(s, tb, res, 'lossfield', 0, {});
+    const pdExp = 2 * e0.alpha.d * e0.ex.Pexp;
+    const err = Math.abs(lv.lossDielMap / pdExp - 1);
+    check('losses: dielectric map integral = 2·α_d·P', err < 0.06,
+          `${(lv.lossDielMap * 1e3).toFixed(4)} mW/m vs ${(pdExp * 1e3).toFixed(4)} mW/m, ${(100 * err).toFixed(1)} %`);
+    check('losses: title with the split', /signal conductor .*ground .*dielectric/.test(lv.info), lv.info);
+    check('losses: log scale over five decades', lv.scaleLog && Math.abs(lv.zMax - lv.zMin - 5) < 1e-9);
 }
 
 // ---- differential pair ----
@@ -95,11 +105,17 @@ const ms = { trace_width: 0.3e-3, substrate_height: 0.254e-3, trace_thickness: 3
 // ---- coax (closed form) ----
 {
     const s = new CoaxSolver({ inner_diameter: 1e-3, dielectric_diameter: 3.5e-3, epsilon_r: 2.1,
-                               sigma_cond: 5.8e7, freq: F, mesh_backend: 'triangular' });
+                               tan_delta: 0.0004, sigma_cond: 5.8e7, freq: F, mesh_backend: 'triangular' });
     const { tb, res } = await setup(s);
     powerCheck('coax', env(s, tb, res, 'sfield', 0, {}), 0.005);
     const pot = buildFieldView(env(s, tb, res, 'potential', 0, {}));
-    check('coax potential from the closed form', pot.zMax === 1 && pot.zMin === 0, `${pot.zMin}…${pot.zMax}`);
+    check('coax potential from the closed form', pot.zMax === 1 && pot.zMin === -1, `${pot.zMin}…${pot.zMax}`);
+    const e = env(s, tb, res, 'lossfield', 0, {});
+    const lv = buildFieldView(e);
+    const pc = 2 * e.alpha.c * e.ex.Pexp, pd = 2 * e.alpha.d * e.ex.Pexp;
+    const ec = Math.abs(lv.lossCondMap / pc - 1), ed = Math.abs(lv.lossDielMap / pd - 1);
+    check('coax losses: conductor rings = 2·α_c·P', ec < 0.02, `${(100 * ec).toFixed(2)} %`);
+    check('coax losses: dielectric rings = 2·α_d·P', ed < 0.02, `${(100 * ed).toFixed(2)} %`);
 }
 
 // ---- waveguide ----

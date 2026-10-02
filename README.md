@@ -2,11 +2,12 @@
 
 > **Fork notice.** This is a modified version of
 > [js_2d_fields](https://github.com/Ttl/js_2d_fields) by Henrik Forstén.
-> It adds **|H| Field**, **Current J** and **Power flow S** views (magnetic
-> field, conductor current density from the eddy-current solve, Poynting
-> vector), E / H / S arrows, field lines and equipotentials, one excitation
-> (voltage, current or power) and an instantaneous time display for all field
-> views, and standing waves. Changes by David Riehl, 2026-10-01/02, see
+> It adds **|H| Field**, **Current J**, **Power flow S** and **Losses** views
+> (magnetic field, conductor current density from the eddy-current solve,
+> Poynting vector, where conductor and dielectric loss arise), E / H / S
+> arrows, field lines and equipotentials, and one excitation (voltage, current
+> or power) for all field views; it opens with the Full-wave solver. Made for
+> teaching (Advanced PCB Design). Changes by David Riehl, 2026-10-01/02, see
 > [FORK_CHANGES.md](FORK_CHANGES.md). Licensed under the
 > GNU GPL v3 like the original. This version runs online at
 > https://advpcb.davidriehl.de/tl/field_solver.html (build the upload folder
@@ -27,7 +28,7 @@ Try it online: https://hforsten.com/field_solver.html
 - Full RLGC Extraction: Resistance, inductance, capacitance, conductance per unit length
 - Loss Modeling: Conductor losses (skin effect, surface roughness) and dielectric losses
 - S-Parameter Export: Touchstone .s2p and .s4p file generation
-- Visualization: 2D potential plots, E-field streamlines, H field with field lines and conductor current density (fork), frequency-dependent plots
+- Visualization: 2D potential plots, E-field streamlines, H field with field lines, conductor current density, power flow and loss density (fork), frequency-dependent plots
 - Adaptive Meshing: Automatic mesh refinement for accurate field solutions
 
 ## Quick Start

@@ -147,7 +147,7 @@ export function coaxFieldAt(s, f) {
         shield.push({ r0: rS[i], r1: rS[i + 1], H, J });
     }
     return {
-        ok: true, kind: 'radial', f, mode: 'single', delta, deltaWall: delta,
+        ok: true, kind: 'radial', f, mode: 'single', delta, deltaWall: delta, sigma,
         cx: 0, cy: 0, a, b, tShield: tS, differential: false, per: '1 A',
         // Dielectric permittivity: E_r = (η0/√εr)·Hφ in the dielectric (TEM).
         er: s.epsilon_r ?? 1,
@@ -274,6 +274,6 @@ export function waveguideFieldAt(s, f, opts = {}) {
         ok: true, kind: 'wg', f, mode: along === 'x' ? 'TE10' : 'TE01', per: '1 W',
         x: Float64Array.from(xs), y: Float64Array.from(ys),
         H, Hxr, Hxi, Hyr, Hyi, Hzr, Hzi, J, Jr, Ji, Jtr, Jti, Exr, Eyr,
-        delta, deltaWall: delta, beta, differential: false,
+        delta, deltaWall: delta, beta, differential: false, sigma,
     };
 }

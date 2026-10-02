@@ -117,6 +117,7 @@ export function buildMqsGrid(mqsMesh, domain, field, opts = {}) {
 export function resampleMqsField(mesh, field, grid, parity = null) {
     const { nodes, tris, triEdges, nNodes, nTris } = mesh;
     const { sol, nF, dofOf, isCondTri, triGroup, Cr, Ci, CgR, CgI, omega, sigma } = field;
+    const sigmaW = field.sigmaW ?? sigma;
     const dom = field.domain;
 
     // A1 at every P2 DOF (vertices then edges), Dirichlet DOFs are 0.
@@ -247,6 +248,9 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
     const Hxr = mk(), Hxi = mk(), Hyr = mk(), Hyi = mk();
     const Jr = mk(), Ji = mk();
     const H = mk(), J = mk();
+    // Conductor loss density ½·|J|²/σ (W/m³ for the 1 A drive), σ of the meshed metal or
+    // of the wall metal.
+    const Q = mk();
     // Physical vector potential A = C·A1 (Wb/m). Its contour lines are the H field
     // lines (H = curl(A ẑ)/μ0 is tangential to them); evenly spaced levels give a line
     // density proportional to |H|. Defined on the meshed domain only.
@@ -261,7 +265,7 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
             let s = 1, m = 1;
             if (parity && qx < 0) { qx = -qx; m = -1; if (parity === 'odd') s = -1; }
             let hxr = NaN, hxi = NaN, hyr = NaN, hyi = NaN, jr = NaN, ji = NaN;
-            let apr = NaN, api = NaN;
+            let apr = NaN, api = NaN, sig = sigma;
             const t = find(qx, qy);
             // A grid line lying exactly on a metal face belongs to the metal for J:
             // the default nudge picks one side, so look at the other sides too. A is
@@ -294,6 +298,7 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
                         : (wp.right && Math.abs(qx - dom.xmax) <= eps) ? 'right'
                         : (wp.left && field.sym === 1 && Math.abs(qx - dom.xmin) <= eps) ? 'left' : null;
                     if (onWall) {
+                        sig = sigmaW;
                         const prof = slabProfile((wt[onWall] ?? Infinity) / deltaW, 0, deltaW);
                         const k = surfaceCurrent(onWall, hxr, hxi, hyr, hyi);
                         [jr, ji] = cmul(k[0], k[1], prof.jr, prof.ji);
@@ -305,6 +310,7 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
                 if (wl && wl.s <= d) {
                     const hs = wallSurfaceH(wl.w, qx, qy);
                     if (hs) {
+                        sig = sigmaW;
                         const prof = slabProfile(d / deltaW, wl.s / deltaW, deltaW);
                         const [kr, ki] = surfaceCurrent(wl.w, hs.hxr, hs.hxi, hs.hyr, hs.hyi);
                         [jr, ji] = cmul(kr, ki, prof.jr, prof.ji);
@@ -331,12 +337,13 @@ export function resampleMqsField(mesh, field, grid, parity = null) {
             if (Number.isFinite(jr)) {
                 Jr[j][i] = s * jr; Ji[j][i] = s * ji;
                 J[j][i] = Math.hypot(jr, ji);
+                Q[j][i] = 0.5 * (jr * jr + ji * ji) / sig;
             } else {
-                Jr[j][i] = Ji[j][i] = J[j][i] = NaN;
+                Jr[j][i] = Ji[j][i] = J[j][i] = Q[j][i] = NaN;
             }
         }
     }
-    return { x, y, H, Hxr, Hxi, Hyr, Hyi, J, Jr, Ji, Ar, Ai };
+    return { x, y, H, Hxr, Hxi, Hyr, Hyi, J, Jr, Ji, Q, Ar, Ai };
 }
 
 // Net current of each meshed conductor class straight from the FEM solution

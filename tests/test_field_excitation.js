@@ -5,9 +5,8 @@
 // LICENSE). See FORK_CHANGES.md for the list of changes.
 //
 // Excitation of the field plots (src/field_excitation.js): V / I / P conversion over the
-// line impedance, differential conventions, standing waves and the impedance parser.
-import { excitation, reflection, standingWave, parseImpedance, cabs, carg, inst, c, formatSI }
-    from '../src/field_excitation.js';
+// line impedance, differential conventions, the waveguide and the label formatting.
+import { excitation, cabs, carg, c, formatSI, formatPhasor } from '../src/field_excitation.js';
 
 let failures = 0;
 function check(name, ok, detail = '') {
@@ -61,36 +60,9 @@ const Z50 = c(50, 0);
     const p = excitation({ kind: 'P', value: 4, waveguide: true });
     check('waveguide amplitude is √P', near(p.cE.re, 2) && near(p.cH.re, 2));
 }
-// Standing waves.
-{
-    const V = c(1), I = c(0.02);
-    const m = standingWave(V, I, reflection('matched', Z50), 0.3);
-    check('matched line: V and I unchanged', near(m.V.re, 1) && near(m.I.re, 0.02) && near(m.V.im, 0));
-    const o0 = standingWave(V, I, reflection('open', Z50), 0);
-    check('open end: double voltage, no current', near(cabs(o0.V), 2) && near(cabs(o0.I), 0, 1e-12));
-    const o4 = standingWave(V, I, reflection('open', Z50), 0.25);
-    check('λ/4 from an open end: no voltage, double current', near(cabs(o4.V), 0, 1e-12) && near(cabs(o4.I), 0.04));
-    const o8 = standingWave(V, I, reflection('open', Z50), 0.125);
-    const dph = (carg(o8.I) - carg(o8.V)) * 180 / Math.PI;
-    check('λ/8 from an open end: V and I 90° apart', near(Math.abs(dph), 90, 1e-9), `${dph.toFixed(3)}°`);
-    // At that point E and H alternate: when one is at its peak the other is zero.
-    const wt = -carg(o8.V);
-    check('E at its peak while H is zero', near(Math.abs(inst(o8.V, wt)), cabs(o8.V)) && near(inst(o8.I, wt), 0, 1e-12));
-    const s0 = standingWave(V, I, reflection('short', Z50), 0);
-    check('short: no voltage, double current', near(cabs(s0.V), 0, 1e-12) && near(cabs(s0.I), 0.04));
-    const g = reflection('custom', Z50, c(100, 0));
-    check('Γ of 100 Ω on 50 Ω is 1/3', near(g.re, 1 / 3) && near(g.im, 0));
-}
-// Impedance parser.
-{
-    const cases = [['50', 50, 0], ['50+20j', 50, 20], ['25 - 10j', 25, -10], ['j30', 0, 30], ['-j30', 0, -30],
-                   ['1e3', 1000, 0], ['75 Ω', 75, 0], ['10+j5', 10, 5]];
-    for (const [s, re, im] of cases) {
-        const z = parseImpedance(s);
-        check(`parse "${s}"`, z && near(z.re, re) && near(z.im, im), z ? `${z.re}${z.im >= 0 ? '+' : ''}${z.im}j` : 'null');
-    }
-    check('parse rejects text', parseImpedance('abc') === null);
-}
+// Phasor label: the phase only when it is not zero.
+check('phasor label', formatPhasor(c(0.02), 'A') === '20 mA' && formatPhasor(c(0, 1), 'V') === '1 V ∠ 90.0°',
+      `${formatPhasor(c(0.02), 'A')}, ${formatPhasor(c(0, 1), 'V')}`);
 check('SI formatting', formatSI(0.0199, 'A') === '19.9 mA' && formatSI(1, 'V') === '1 V' && formatSI(2.5e-6, 'W') === '2.5 µW',
       `${formatSI(0.0199, 'A')}, ${formatSI(1, 'V')}, ${formatSI(2.5e-6, 'W')}`);
 

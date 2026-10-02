@@ -1,7 +1,7 @@
 // MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
 // added the on-demand H / J field request, scale-dialog types and plot option handlers
-// (incl. E / H field arrows); 2026-10-02: excitation, time display with ▶ animation and
-// line termination controls of the field views.
+// (incl. E / H field arrows); 2026-10-02: excitation controls of the field views, the
+// Losses view, the log / linear menu of the plot; the page opens with the Full-wave solver.
 // See FORK_CHANGES.md for the full list of changes.
 
 import { Complex } from './complex.js';
@@ -152,6 +152,8 @@ function getInputValueUnitless(id) {
  * These are used to filter out default values from URL parameters.
  * Doesn't need to match HTML defaults.
  * DO NOT CHANGE OR ALL EXISTING LINKS WILL BREAK.
+ * (mesh_backend stays 'rectilinear' here although the page now opens with the
+ * Full-wave solver: a link without mesh_backend was made with the quasi-static one.)
  */
 const DEFAULT_SETTINGS = {
     tl_type: 'microstrip',
@@ -2518,10 +2520,10 @@ function bindEvents() {
     const resetFieldScales = () => {
         for (const k of Object.keys(scaleRanges)) { scaleRanges[k].min = null; scaleRanges[k].max = null; }
     };
-    const SCALE_IDS = ['plot-field-freq', 'plot-field-display', 'plot-field-scale', 'plot-exc-kind',
-                       'plot-exc-value', 'plot-exc-rms', 'plot-sw-load', 'plot-sw-zl', 'plot-sw-pos'];
-    for (const id of ['plot-streamlines', 'plot-contours', 'plot-contour-kind', 'plot-field-phase',
-                      'plot-arrows', 'plot-arrow-density', ...SCALE_IDS]) {
+    window.resetFieldScales = resetFieldScales;   // the log / linear menu of the plot
+    const SCALE_IDS = ['plot-field-freq', 'plot-exc-kind', 'plot-exc-value', 'plot-exc-rms'];
+    for (const id of ['plot-streamlines', 'plot-contours', 'plot-contour-kind',
+                      'plot-arrow-density', ...SCALE_IDS]) {
         const el = document.getElementById(id);
         if (!el) continue;
         el.addEventListener('change', () => {
@@ -2530,31 +2532,6 @@ function bindEvents() {
             if (solver && solver.solution_valid) draw();
         });
     }
-    const phaseEl = document.getElementById('plot-field-phase');
-    if (phaseEl) phaseEl.addEventListener('input', () => { if (solver && solver.solution_valid) draw(); });
-    const swPosEl = document.getElementById('plot-sw-pos');
-    if (swPosEl) swPosEl.addEventListener('input', () => { if (solver && solver.solution_valid) draw(); });
-
-    // ▶ runs through ωt (switching to the instantaneous display), ■ stops.
-    const playBtn = document.getElementById('plot-field-play');
-    let playing = false;
-    const stopPlay = () => { playing = false; if (playBtn) playBtn.innerHTML = '&#9654;'; };
-    const step = () => {
-        if (!playing) return;
-        if (!(solver && solver.solution_valid)) { stopPlay(); return; }
-        const ph = (parseFloat(phaseEl.value) || 0) + 10;
-        phaseEl.value = String(ph >= 360 ? ph - 360 : ph);
-        draw();
-        setTimeout(step, 60);
-    };
-    if (playBtn) playBtn.addEventListener('click', () => {
-        if (playing) { stopPlay(); return; }
-        const disp = document.getElementById('plot-field-display');
-        if (disp && disp.value !== 'inst') { disp.value = 'inst'; resetFieldScales(); }
-        playing = true;
-        playBtn.innerHTML = '&#9632;';
-        step();
-    });
     updateFieldControls();
 
     // Copy link button
@@ -2568,13 +2545,10 @@ function bindEvents() {
 }
 
 
-// Visibility and units of the field-view controls: the load impedance and the distance
-// only with a termination, the unit of the excitation value, the voltage between
-// conductors only for a differential pair, a waveguide only by power.
+// Units and choices of the excitation: the voltage between conductors only for a
+// differential pair, a waveguide only by power.
 function updateFieldControls() {
     const kindEl = document.getElementById('plot-exc-kind');
-    const load = document.getElementById('plot-sw-load');
-    const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
     const isWG = !!(solver && solver.mode_type === 'waveguide');
     const isDiff = !!(solver && solver.is_differential);
     if (kindEl) {
@@ -2586,12 +2560,6 @@ function updateFieldControls() {
         if (unit) unit.textContent = { V: 'V', Vd: 'V', I: 'A', P: 'W' }[kindEl.value] || 'V';
         const rms = document.getElementById('plot-exc-rms');
         if (rms) rms.disabled = kindEl.value === 'P';
-    }
-    if (load) {
-        for (const opt of load.options) opt.disabled = isWG && opt.value !== 'matched';
-        if (isWG) load.value = 'matched';
-        show('plot-sw-zl-group', load.value === 'custom');
-        show('plot-sw-pos-group', load.value !== 'matched');
     }
 }
 window.updateFieldControls = updateFieldControls;
@@ -2605,6 +2573,7 @@ const scaleRanges = {
     hfield: { min: null, max: null },
     jfield: { min: null, max: null },
     sfield: { min: null, max: null },
+    lossfield: { min: null, max: null },
     geometry: { min: null, max: null }
 };
 
@@ -2616,11 +2585,12 @@ function getViewType(view) {
     if (view === 'hfield') return 'hfield';
     if (view === 'jfield') return 'jfield';
     if (view === 'sfield') return 'sfield';
+    if (view === 'lossfield') return 'lossfield';
     return 'geometry';
 }
 
 // The scale dialog shows real values in the unit of the view. Logarithmic color axes
-// (|H|, J, S) work in log10 internally: the dialog converts, so a power density of
+// work in log10 internally: the dialog converts, so a power density of
 // 1e-4 W/mm² reads 0.0001 and not -4 (which looked like a negative power).
 const scaleDisp = {
     toDisp: (v) => (getScaleRange().log ? Math.pow(10, v) : v),

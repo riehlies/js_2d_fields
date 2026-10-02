@@ -1,8 +1,8 @@
 // MODIFIED 2026-10-01/02 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
-// added the |H| Field, Current J and Power flow S views, E / H / S arrows (now chosen in a
-// menu of the plot), one excitation (voltage, current or power) and one time display for
-// all field views, standing waves, field lines and equipotentials on the field views.
-// The view builders live in field_views.js.
+// added the |H| Field, Current J, Power flow S and Losses views, E / H / S arrows, one
+// excitation (voltage, current or power) for all field views, field lines and
+// equipotentials on the field views, and the menu row of the plot (view, log / linear
+// scale, arrows, odd / even mode). The view builders live in field_views.js.
 // See FORK_CHANGES.md for the full list of changes.
 
 import { computeSParamsSingleEnded, computeSParamsDiffAuto, sParamTodB,
@@ -10,8 +10,7 @@ import { computeSParamsSingleEnded, computeSParamsDiffAuto, sParamTodB,
 import { isComplement, svgRingPath } from './shapes.js';
 import { buildFieldView, geometryLines, buildArrowData, formatFreq, isWaveguide,
          dielectricAt } from './field_views.js';
-import { excitation, reflection, standingWave, parseImpedance, formatSI, formatPhasor,
-         c, cmul, cconj, cabs } from './field_excitation.js';
+import { excitation, formatSI, formatPhasor, c, cmul, cconj, cabs } from './field_excitation.js';
 
 // Lazy Plotly access - allows app to function while Plotly is loading
 const getPlotly = () => window.Plotly;
@@ -299,8 +298,6 @@ function hasHField(solver) {
 const elVal = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
 
 function readFieldOptions() {
-    const phase = parseFloat(elVal('plot-field-phase'));
-    const phaseDeg = Number.isFinite(phase) ? phase : 0;
     const count = (id, dflt) => {
         const raw = String(elVal(id)).trim();
         if (raw === '') return dflt;
@@ -308,9 +305,6 @@ function readFieldOptions() {
         return Number.isFinite(n) && n > 0 ? Math.min(n, 200) : 0;
     };
     return {
-        inst: elVal('plot-field-display') === 'inst',
-        phaseDeg,
-        wt: phaseDeg * Math.PI / 180,
         log: elVal('plot-field-scale') !== 'linear',
         nLines: count('plot-streamlines', 0),
         nContours: count('plot-contours', 0),
@@ -318,27 +312,42 @@ function readFieldOptions() {
     };
 }
 
-// Line impedance of the plotted mode at the field frequency, interpolated in the sweep.
-function zcAt(results, freq, modeIdx) {
+// A quantity of the plotted mode at the field frequency, interpolated linearly in the
+// sweep (clamped at its ends). `get(mode)` returns a number or {re, im}, or null.
+function sweepAt(results, freq, modeIdx, get) {
     if (!results || !results.length) return null;
-    const zOf = (r) => {
+    const valOf = (r) => {
         const modes = r.result && r.result.modes;
         if (!modes || !modes.length) return null;
-        const m = modes[modeIdx] || modes[0];
-        if (m.Zc && Number.isFinite(m.Zc.re) && Number.isFinite(m.Zc.im)) return c(m.Zc.re, m.Zc.im);
-        return Number.isFinite(m.Z0) ? c(m.Z0, 0) : null;
+        return get(modes[modeIdx] || modes[0]);
     };
-    const pts = results.map(r => ({ f: r.freq, z: zOf(r) })).filter(p => p.z).sort((a, b) => a.f - b.f);
+    const pts = results.map(r => ({ f: r.freq, v: valOf(r) })).filter(p => p.v !== null).sort((a, b) => a.f - b.f);
     if (!pts.length) return null;
-    if (freq <= pts[0].f) return pts[0].z;
-    if (freq >= pts[pts.length - 1].f) return pts[pts.length - 1].z;
+    if (freq <= pts[0].f) return pts[0].v;
+    if (freq >= pts[pts.length - 1].f) return pts[pts.length - 1].v;
     let k = 1;
     while (k < pts.length - 1 && pts[k].f < freq) k++;
     const a = pts[k - 1], b = pts[k], t = (freq - a.f) / ((b.f - a.f) || 1);
-    return c(a.z.re + t * (b.z.re - a.z.re), a.z.im + t * (b.z.im - a.z.im));
+    if (typeof a.v === 'number') return a.v + t * (b.v - a.v);
+    return c(a.v.re + t * (b.v.re - a.v.re), a.v.im + t * (b.v.im - a.v.im));
 }
 
-const LOAD_NAMES = { open: 'open end', short: 'short circuit', custom: 'load' };
+// Line impedance of the plotted mode at the field frequency.
+function zcAt(results, freq, modeIdx) {
+    return sweepAt(results, freq, modeIdx, (m) => {
+        if (m.Zc && Number.isFinite(m.Zc.re) && Number.isFinite(m.Zc.im)) return c(m.Zc.re, m.Zc.im);
+        return Number.isFinite(m.Z0) ? c(m.Z0, 0) : null;
+    });
+}
+
+// Conductor and dielectric attenuation of the plotted mode (Np/m) at the field frequency.
+const NP_PER_DB = 1 / 8.685889638065035;
+function alphaAt(results, freq, modeIdx) {
+    const ac = sweepAt(results, freq, modeIdx, (m) => (Number.isFinite(m.alpha_c) ? m.alpha_c : null));
+    const ad = sweepAt(results, freq, modeIdx, (m) => (Number.isFinite(m.alpha_d) ? m.alpha_d : null));
+    if (ac === null || ad === null) return null;
+    return { c: ac * NP_PER_DB, d: ad * NP_PER_DB };
+}
 
 // Excitation of the field views: amplitudes cE, cH of the plotted position, the expected
 // power and the label for the title.
@@ -356,20 +365,6 @@ function readExcitation(solver) {
     const base = excitation({ kind, value, rms, Zc, nCond, mode, waveguide: wg });
     if (!base.ok) return { ...base, cE: c(1), cH: c(0), label: base.note };
     const ex = { ...base, nCond, mode, Zc };
-    // Termination: standing wave at d/λ from the load (TEM lines only).
-    const load = elVal('plot-sw-load') || 'matched';
-    const dl = parseFloat(elVal('plot-sw-pos'));
-    ex.standing = false;
-    if (!wg && load !== 'matched') {
-        const ZL = parseImpedance(elVal('plot-sw-zl'));
-        if (load === 'custom' && !ZL) ex.note = 'The load impedance could not be read, the line is drawn matched.';
-        else {
-            const gamma = reflection(load, Zc, ZL);
-            const sw = standingWave(base.V, base.I, gamma, Number.isFinite(dl) ? dl : 0);
-            ex.cE = sw.V; ex.cH = sw.I;
-            ex.standing = { load, gamma, dl: Number.isFinite(dl) ? dl : 0, ZL };
-        }
-    }
     ex.Pexp = nCond * 0.5 * cmul(ex.cE, cconj(ex.cH)).re;
     if (wg) ex.Pexp = base.P;
     ex.label = excitationLabel(ex, rms, kind);
@@ -384,13 +379,7 @@ function excitationLabel(ex, rms, kind) {
     if (ex.mode === 'odd') s = `±${formatPhasor(V, 'V')} per conductor (${formatSI(2 * cabs(V), 'V')} differential), ±${formatPhasor(I, 'A')}`;
     else if (ex.mode === 'even') s = `${formatPhasor(V, 'V')} on both conductors, ${formatPhasor(I, 'A')} each`;
     else s = `V = ${formatPhasor(V, 'V')}, I = ${formatPhasor(I, 'A')}`;
-    if (ex.standing) {
-        const sw = ex.standing;
-        const name = sw.load === 'custom' ? `Z_L = ${formatPhasor(sw.ZL, 'Ω')}` : LOAD_NAMES[sw.load];
-        s = `${name}, ${+sw.dl.toFixed(4)} λ from it: ${s} · incident P = ${formatSI(ex.P, 'W')}`;
-    } else {
-        s += `, P = ${formatSI(ex.P, 'W')}`;
-    }
+    s += `, P = ${formatSI(ex.P, 'W')}`;
     return s + pk + (ex.note ? ' · ' + ex.note : '');
 }
 
@@ -399,9 +388,10 @@ function buildEnv(solver, view, f) {
     const opt = readFieldOptions();
     const ex = readExcitation(solver);
     const fields = getFields();
+    const freq = fieldPlotFreq();
     return {
-        solver, view, f, ex, opt,
-        freq: fieldPlotFreq(),
+        solver, view, f, ex, opt, freq,
+        alpha: alphaAt(get.frequencySweepResults(), freq, mqsModeIndex()),
         E: { Ex: fields.Ex, Ey: fields.Ey },
         V: getPotential(),
         epsAt: (x, y) => dielectricAt(solver, x, y),
@@ -440,6 +430,18 @@ function conductorLayerShapes(solver, maxY) {
 const ARROW_COLORS = { E: 'rgba(70, 150, 255, 0.95)', H: 'rgba(255, 60, 60, 0.95)', S: 'rgba(255, 255, 255, 0.9)' };
 const ARROW_CHOICES = [['', 'Arrows: off'], ['E', 'E arrows'], ['H', 'H arrows'], ['EH', 'E + H arrows'],
                        ['S', 'S markers'], ['EHS', 'E + H + S']];
+
+// Views of the menu (internal name, button label).
+const VIEW_BUTTONS = [['potential', 'Potential'], ['efield', '|E| Field'], ['hfield', '|H| Field'],
+                      ['jfield', 'Current J'], ['sfield', 'Power flow S'], ['lossfield', 'Losses']];
+
+// Buttons of the log / linear menu for a view, or null where there is no choice. The
+// current density shows its magnitude on the log scale and its sign on the linear one.
+function scaleMenuLabels(view) {
+    if (view === 'geometry' || view === 'potential') return null;
+    if (view === 'jfield' && !isWaveguide(get.solver())) return ['|J| log', 'Jz linear (±)'];
+    return ['Log scale', 'Linear scale'];
+}
 
 function getArrowOptions() {
     const solver = get.solver();
@@ -547,7 +549,9 @@ function draw(resetZoom = false) {
     const view = currentView.startsWith('potential') ? 'potential'
         : currentView.startsWith('efield') ? 'efield' : currentView;
     const VIEW_NAMES = { potential: 'Potential', efield: '|E| field', hfield: 'H field',
-                         jfield: 'Current density', sfield: 'Power flow' };
+                         jfield: 'Current density', sfield: 'Power flow', lossfield: 'Losses' };
+    // Views computed from the eddy-current (H / J) data, which also lives inside the metal.
+    const MQS_VIEWS = ['hfield', 'jfield', 'sfield', 'lossfield'];
 
     if (view === "geometry") {
         title = "Transmission Line Geometry";
@@ -560,7 +564,7 @@ function draw(resetZoom = false) {
         shapes.push(...conductorLayerShapes(solver, maxY));
         [xMM, yMM] = gridMM();
         if (solver.solution_valid && solver.mesh_generated) {
-            // Field lines and equipotentials of the current excitation and time display.
+            // Field lines and equipotentials of the current excitation.
             const f = wg ? ensureMqsField() : currentMqsField();
             const env = buildEnv(solver, 'geometry', f);
             if (env.ex.ok) traces.push(...geometryLines(env));
@@ -572,7 +576,7 @@ function draw(resetZoom = false) {
 
     else if (VIEW_NAMES[view] && solver.solution_valid) {
         if (!solver.mesh_generated) solver.ensure_mesh();
-        const needF = view === 'hfield' || view === 'jfield' || view === 'sfield' || (wg && view === 'efield');
+        const needF = MQS_VIEWS.includes(view) || (wg && view === 'efield');
         const f = needF ? ensureMqsField() : currentMqsField();
         const failed = needF && !f && mqsField && mqsField.key === mqsKey() && !mqsField.ok;
         if (failed) {
@@ -592,7 +596,9 @@ function draw(resetZoom = false) {
                 traces.push(...fieldView.traces);
                 shapes.push(...(fieldView.shapes || []));
                 title = `${fieldView.title} · ${formatFreq(env.freq)}`;
-                subtitle = env.ex.label + (fieldView.info ? ` · ${fieldView.info}` : '');
+                // A long check / loss line goes on a line of its own (narrow windows).
+                const info = fieldView.info || '';
+                subtitle = env.ex.label + (!info ? '' : (env.ex.label.length + info.length > 100 ? '<br>' : ' · ') + info);
                 xMM = fieldView.xMM; yMM = fieldView.yMM;
                 zMin = fieldView.zMin; zMax = fieldView.zMax;
                 scaleLog = !!fieldView.scaleLog; scaleUnit = fieldView.scaleUnit || '';
@@ -606,7 +612,7 @@ function draw(resetZoom = false) {
                           mode: "markers", marker: { size: 0, opacity: 0 }, showlegend: false, hoverinfo: "skip" });
         }
         const yTop = solver.y ? solver.y[solver.y.length - 1] : maxY;
-        if (view === 'hfield' || view === 'jfield') {
+        if (view === 'hfield' || view === 'jfield' || view === 'lossfield') {
             // The field lives inside the metal too: outlines only.
             shapes.push(...outlineShapes(solver, Math.max(maxY, yTop)));
         } else if (view === 'potential') {
@@ -629,7 +635,7 @@ function draw(resetZoom = false) {
     // Static grid for the rectilinear mesh overlay.
     const [xMM_mesh, yMM_mesh] = gridMM();
     const nx_mesh = xMM_mesh.length, nyDisplay_mesh = yMM_mesh.length;
-    const mqsView = !!fieldView && (view === 'hfield' || view === 'jfield' || view === 'sfield');
+    const mqsView = !!fieldView && MQS_VIEWS.includes(view);
 
     // E / H arrows (filled by updateArrows once the axis ranges are known).
     const arrowTr = solver.solution_valid ? arrowPlaceholders() : [];
@@ -693,12 +699,12 @@ function draw(resetZoom = false) {
         }
     }
 
-    // UI menus: view, odd / even mode (differential lines) and arrows, in one row above
-    // the plot area. The title sits above them.
+    // Menu row above the plot area: view, log / linear scale and arrows on the left, the
+    // odd / even mode of a differential pair on the right. The title sits above them.
     const menuBase = { y: 1.01, yanchor: 'bottom', xanchor: 'left', showactive: true,
                        bgcolor: '#2a2a2a', bordercolor: '#444', font: { color: '#aaa' }, pad: { t: 0, b: 2 } };
     const titleText = subtitle
-        ? `${title}<br><span style="font-size:12px;color:#bbb">${subtitle}</span>`
+        ? `${title}<br><span style="font-size:12px;color:#bbb">${subtitle.replace('<br>', '</span><br><span style="font-size:12px;color:#bbb">')}</span>`
         : title;
     const layout = {
         title: { text: titleText, font: { color: '#fff', size: 15 }, x: 0.5, xanchor: 'center',
@@ -719,7 +725,7 @@ function draw(resetZoom = false) {
             gridcolor: '#444',
             zerolinecolor: '#555'
         },
-        margin: { l: 70, r: 90, t: subtitle ? 92 : 78, b: 60 },
+        margin: { l: 70, r: 90, t: subtitle ? (subtitle.includes('<br>') ? 108 : 92) : 78, b: 60 },
         showlegend: anyLegend,
         legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top', bgcolor: 'rgba(30,30,30,0.7)',
                   bordercolor: '#555', borderwidth: 1, font: { color: '#ddd', size: 11 } },
@@ -732,54 +738,44 @@ function draw(resetZoom = false) {
 
         updatemenus: (() => {
             const menus = [];
-
-            // View selector (Geometry/Potential/E-field)
+            // View selector. Both the highlighted button and the click handler key off
+            // the LABEL, never a fixed index (the Potential button is absent for a
+            // waveguide, which has no static potential).
             const viewButtons = [{ label: "Geometry", method: "skip", args: [] }];
             if (solver.solution_valid) {
-                // A source-free medium (rectangular waveguide) has no static potential to
-                // show, its field is the mode field, so the Potential button is omitted
-                // rather than left to render a blank heatmap.
-                if (solver.has_potential !== false) {
-                    viewButtons.push({ label: "Potential", method: "skip", args: [] });
+                for (const [v, label] of VIEW_BUTTONS) {
+                    if (v === 'potential' && solver.has_potential === false) continue;
+                    viewButtons.push({ label, method: "skip", args: [] });
                 }
-                viewButtons.push({ label: "|E| Field", method: "skip", args: [] });
-                // H field and current density (on demand: eddy-current solve, or the
-                // closed form for coax and waveguide).
-                viewButtons.push({ label: "|H| Field", method: "skip", args: [] });
-                viewButtons.push({ label: "Current J", method: "skip", args: [] });
-                viewButtons.push({ label: "Power flow S", method: "skip", args: [] });
             }
-            // Both the highlighted button and the click handler key off the LABEL, never a
-            // fixed index, with Potential absent, "|E| Field" is at index 1, not 2.
-            // Prefix match so the differential "_odd"/"_even" view variants land on their
-            // own button rather than falling through to the first one.
-            const activeLabel = currentView.startsWith("geometry") ? "Geometry"
-                : currentView.startsWith("potential") ? "Potential"
-                : currentView === "hfield" ? "|H| Field"
-                : currentView === "jfield" ? "Current J"
-                : currentView === "sfield" ? "Power flow S" : "|E| Field";
+            const activeLabel = (VIEW_BUTTONS.find(([v]) => v === view) || [null, 'Geometry'])[1];
             menus.push({ ...menuBase, name: 'view', x: 0.0,
                 active: Math.max(0, viewButtons.findIndex(b => b.label === activeLabel)),
                 buttons: viewButtons });
 
-            let x = 0.17;
-            // Mode selector (Odd/Even) - only for differential lines
-            if (isDifferentialMode()) {
-                menus.push({ ...menuBase, name: 'mode', x, active: getSelectedModeIndex(),
-                    buttons: [{ label: "Odd Mode", method: "skip", args: [] },
-                              { label: "Even Mode", method: "skip", args: [] }] });
-                x += 0.15;
+            // Log / linear color scale (the potential has only its linear signed scale).
+            const scaleLabels = scaleMenuLabels(view);
+            if (solver.solution_valid && scaleLabels) {
+                menus.push({ ...menuBase, name: 'scale', x: 0.155,
+                    active: elVal('plot-field-scale') === 'linear' ? 1 : 0,
+                    buttons: scaleLabels.map(label => ({ label, method: 'skip', args: [] })) });
             }
 
             // Arrow selector: E, H and S need the H field of the Full-wave solver.
             if (solver.solution_valid) {
                 const choices = ARROW_CHOICES.filter(([v]) => hasHField(solver) || !/[HS]/.test(v));
                 const cur = elVal('plot-arrows') || '';
-                menus.push({ ...menuBase, name: 'arrows', x,
+                menus.push({ ...menuBase, name: 'arrows', x: 0.31,
                     active: Math.max(0, choices.findIndex(([v]) => v === cur)),
                     buttons: choices.map(([v, label]) => ({ label, method: 'skip', args: [], value: v })) });
             }
 
+            // Odd / even mode of a differential pair, set apart on the right.
+            if (isDifferentialMode()) {
+                menus.push({ ...menuBase, name: 'mode', x: 1.0, xanchor: 'right', active: getSelectedModeIndex(),
+                    buttons: [{ label: "Odd Mode", method: "skip", args: [] },
+                              { label: "Even Mode", method: "skip", args: [] }] });
+            }
             return menus;
         })()
     };
@@ -816,33 +812,25 @@ function draw(resetZoom = false) {
 
     if (!container._viewListenerBound) {
         container.on('plotly_buttonclicked', (event) => {
-            // Which menu: by name (view / mode / arrows), x position as a fallback.
-            const name = event.menu.name || (event.menu.x < 0.1 ? 'view' : 'mode');
+            const name = event.menu.name;
             const btn = event.menu.buttons[event.menu.active];
             const label = btn && btn.label;
             if (name === 'view') {
-                // Key off the LABEL, not the index: the Potential button is absent for a
-                // source-free medium (see the button list above), so index 1 is not always
-                // "potential".
-                setCurrentView(label === "Geometry" ? "geometry"
-                    : label === "Potential" ? "potential"
-                    : label === "|H| Field" ? "hfield"
-                    : label === "Current J" ? "jfield"
-                    : label === "Power flow S" ? "sfield" : "efield");
+                const v = VIEW_BUTTONS.find(([, l]) => l === label);
+                setCurrentView(v ? v[0] : 'geometry');
+            } else if (name === 'scale') {
+                const sel = document.getElementById('plot-field-scale');
+                if (sel) sel.value = event.menu.active === 1 ? 'linear' : 'log';
+                // The stored color ranges of the dialog belong to the other scale.
+                if (window.resetFieldScales) window.resetFieldScales();
             } else if (name === 'arrows') {
                 const choice = ARROW_CHOICES.find(([, l]) => l === label);
                 const sel = document.getElementById('plot-arrows');
                 if (sel && choice) sel.value = choice[0];
-            } else {
-                // Mode selector clicked (differential lines only)
+            } else if (name === 'mode') {
                 const plotModeEl = document.getElementById('plot-mode');
-                if (plotModeEl) {
-                    plotModeEl.value = event.menu.active === 0 ? 'odd' : 'even';
-                }
-                // Trigger view change notification for mode switch
-                if (window.onViewChanged) {
-                    window.onViewChanged(currentView);
-                }
+                if (plotModeEl) plotModeEl.value = event.menu.active === 0 ? 'odd' : 'even';
+                if (window.onViewChanged) window.onViewChanged(currentView);
             }
             draw();
         });

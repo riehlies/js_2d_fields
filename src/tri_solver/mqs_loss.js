@@ -949,6 +949,9 @@ export function mqsConductorLoss(mesh, condRect, freq, sigma, solveComplexSymmet
             sym, oddSymmetry: !!opts.oddSymmetry,
             wallPEC: wp, wallThick: { ...wt }, sigmaW, deltaW,
             domain: { xmin: xmin_d, xmax: xmax_d, ymin: ymin_d, ymax: ymax_d },
+            // Share of the conductor loss in the signal metal and in the ground (rects
+            // and walls), roughness and plating included (losses view).
+            lossSplit: { trace: R_trace, ground: R_gnd },
         };
     }
     return out;

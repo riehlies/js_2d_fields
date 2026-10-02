@@ -12,146 +12,139 @@ copyright notices are unchanged.
 
 ## What is new
 
-**|H| Field and Current J views** in the field plot (Geometry tab, view
-selector at the top left of the plot):
+The fork is used for teaching (lecture *Advanced PCB Design*): it shows where the
+fields, the current, the power and the losses of a transmission line sit in its
+cross-section. The page opens with the **Full-wave solver** (before: quasi-static),
+which all of the new views need; share links without a solver setting still open
+with the quasi-static one they were made with.
 
-- **|H| Field**: magnetic field magnitude everywhere, including inside the
-  conductors (skin and proximity effect), with the magnetic field lines drawn
-  as contour lines of the vector potential A. Their density is proportional to
-  |H|.
+### Field views
+
+The view menu at the top left of the plot (Geometry tab) offers Geometry,
+Potential, |E| Field, **|H| Field**, **Current J**, **Power flow S** and
+**Losses**. Next to it are the **log / linear** scale menu and the **arrow** menu;
+the odd / even mode of a differential pair sits apart on the right.
+
+- **Potential**: linear and symmetric around 0 V. The ground (and the
+  symmetry plane of an odd-mode pair) is dark, positive conductors red,
+  negative blue. The conductors keep their potential in the color map.
+- **|E|**, **|H|**: peak amplitudes, logarithmic scale by default (most fields
+  span several decades: field concentration at the edges, skin effect). The
+  log scale covers at most three decades and less when the field varies less.
+  |H| includes the field inside the conductors, with the magnetic field lines
+  drawn as contour lines of the vector potential A (density ∝ |H|).
 - **Current J**: longitudinal current density J<sub>z</sub> in the traces, in
-  coplanar grounds and vias, and in the ground planes / enclosure walls.
-- Scaled by the common excitation of all field views (see *Field views*
-  below), in the selected odd / even mode for a differential pair. Peak
-  amplitude or instantaneous value at a phase ωt, logarithmic or linear color
-  scale, selectable frequency (Plot Options → *Field frequency*).
+  coplanar grounds and vias, and in the ground planes / enclosure walls. Log
+  scale: |J| (skin and proximity effect over decades). Linear scale:
+  J<sub>z</sub> with its sign at the moment the line current peaks, current
+  along the line red, return current blue.
+- **Power flow S**: time average S<sub>z</sub> = ½Re(E × H*), with lines
+  enclosing 50 %, 90 % and 99 % of the power and, in the title, ∫S dA against
+  the power the excitation predicts and the share of the power flowing inside
+  the dielectric. Cross-check: for the default microstrip (εr = 4.4,
+  ε<sub>eff</sub> = 3.229) 64.1 % of the power flows in the dielectric, close to
+  the filling factor (ε<sub>eff</sub> − 1)/(εr − 1) = 65.6 %. On the matched
+  line S<sub>z</sub> ≥ 0, the scale is one-sided (numerical noise below zero is
+  drawn as 0). The conductors are drawn filled (no power flows inside).
+- **Losses** (new): time-average loss density ½|J|²/σ in the metal and
+  ½ωε<sub>0</sub>ε<sub>r</sub>tanδ|E|² in the dielectric, in W/mm³, log scale
+  over five decades. The title gives the loss per unit length from the
+  solver's attenuation, P′ = 2αP, split into signal conductor, ground and
+  dielectric (coax: inner conductor, shield, dielectric; waveguide: walls).
+  The split of the conductor loss comes from the MQS solve
+  (R<sub>trace</sub> / R<sub>ground</sub>, roughness and plating included); the
+  loss density of the metal is exported by the solve on the plot grid
+  (`Q = ½|J|²/σ`, wall metal with its own σ). Check: the dielectric part of
+  the map integrates to 2α<sub>d</sub>P within 0.1 % (microstrip), the coax
+  rings to 2α<sub>c</sub>P and 2α<sub>d</sub>P within 0.9 % and 0.2 %.
 
-The fields come from the magneto-quasi-static (MQS) eddy-current solve the
-Full-wave solver already runs for the conductor loss. Selecting one of the
-views runs one extra MQS solve at the chosen frequency on the last
-simulation's mesh. The loss, RLGC and S-parameter results are unchanged.
+All views are scaled by **one excitation** (Plot Options → *Excitation*):
+voltage per conductor, voltage between the conductors of a pair, current per
+conductor or total power, peak or RMS. The solver's unit fields (E and potential
+for 1 V, H and J for 1 A, the waveguide for 1 W) are scaled by the complex
+amplitudes V and I = V/Z<sub>c</sub> of the plotted mode at the field frequency
+(Plot Options → *Field frequency*, Z<sub>c</sub> interpolated in the sweep), so
+½Re(E × H*) integrates to the predicted power directly (0.01–0.53 % for
+microstrip, differential pair odd / even, coax, waveguide). The title shows V, I
+and P. Fields are peak amplitudes, power flow and losses time averages, all for
+the matched line.
 
-**Coax and rectangular waveguide** (added 2026-10-01, second step) use the
-exact closed-form fields instead, since both are exact shapes with a
-homogeneous fill:
+The H and J fields come from the magneto-quasi-static (MQS) eddy-current solve
+the Full-wave solver already runs for the conductor loss. Selecting one of the
+views runs one extra MQS solve at the chosen frequency on the last simulation's
+mesh. The loss, RLGC and S-parameter results are unchanged.
+
+**Coax and rectangular waveguide** use the exact closed-form fields, since both
+are exact shapes with a homogeneous fill:
 
 - Coax: Bessel-function skin effect in the inner conductor,
   H<sub>φ</sub> = I/(2πr) in the dielectric, exponential decay into the
-  shield. Drawn as concentric rings, so thin skin layers stay round at any zoom.
-  Field lines are circles at evenly spaced values of A ∝ ln(b/r).
+  shield, V(r) = V·ln(b/r)/ln(b/a). Drawn as concentric rings, so thin skin
+  layers stay round at any zoom. H lines are circles at evenly spaced values of
+  A ∝ ln(b/r); radial E lines and circular equipotentials.
 - Waveguide: fundamental mode (TE10, or TE01 for a guide taller than wide),
   scaled by the transmitted power (a waveguide has no unique voltage or
-  current). |H| includes the longitudinal
-  H<sub>z</sub>; the field lines are arrows of the instantaneous transverse H;
-  the wall current K = n × H has a longitudinal and a perimeter component.
-  Below cutoff the request is refused (no power to normalize to).
+  current). |H| includes the longitudinal H<sub>z</sub>, the transverse H is
+  drawn as arrows; the wall current K = n × H has a longitudinal and a
+  perimeter component. E lines between the broad walls, spaced by equal flux
+  (density ∝ sin(πx/a)). Below cutoff the request is refused.
 
-**E / H field arrows** (menu in the plot, next to the view selector: off, E,
-H, E + H, S, E + H + S) on every view: arrows of the transverse E (blue) and
-H (red), on a lattice that is re-sampled when zooming or panning. **S** adds
-the Poynting vector as white ⊙ symbols (power out of the page; ⊗ into the
-page where the instantaneous power flow reverses in a standing wave), sized by
-the power density. Arrow length grows with the field strength on a log scale
-over two decades (the field is singular at conductor edges). E + H shows
-directly that the two are perpendicular everywhere; E arrows are masked inside
-metal. H and S need the Full-wave solver.
+**E / H field arrows** (menu in the plot: off, E, H, E + H, S, E + H + S) on every
+view: arrows of the transverse E (blue) and H (red), each at the phase of its
+own maximum, on a lattice that is re-sampled when zooming or panning. **S** adds
+the Poynting vector as white ⊙ symbols (power out of the page), sized by the
+time-average power density. Arrow length grows with the field strength on a log
+scale over two decades. E + H shows directly that the two are perpendicular
+everywhere. E arrows next to a conductor are shortened so they do not reach into
+the metal. H and S need the Full-wave solver.
 
-**Power flow S view**: color map of S<sub>z</sub>, the time average
-½Re(E × H*) or the instantaneous E(t) × H(t), with lines enclosing 50 %, 90 %
-and 99 % of the power and, in the title, ∫S dA against the power the
-excitation predicts and the share of the power flowing inside the dielectric.
-Cross-check: for the default microstrip (εr = 4.4, ε<sub>eff</sub> = 3.229)
-64.1 % of the power flows in the dielectric, close to the filling factor
-(ε<sub>eff</sub> − 1)/(εr − 1) = 65.6 % from the solver's ε<sub>eff</sub>.
+**Field lines and contour lines** (Plot Options → *Field lines*, *Contour
+lines*, *Contours show*):
 
-### Field views: excitation, time display, field lines (2026-10-02)
+- Geometry, Potential, |E|: electric field lines and equipotentials in equal
+  voltage steps (they cross at right angles); lines of equal |E| as the option
+  *|E| levels*. Field lines start at points of equal electric FLUX (weighted by
+  ε·E<sub>n</sub>, the surface charge, over all signal conductors), so every
+  line carries the same charge (before, conductor faces in the substrate got
+  ε<sub>r</sub> times too few lines). A line between the two conductors of a pair
+  is drawn once, lines stop in field-free regions.
+- |H|: H field lines (contours of A<sub>z</sub>). Power flow: 50 / 90 / 99 %
+  lines. Current J and Losses: no lines.
+- Contour lines are computed with a marching-squares pass of our own
+  (`src/isolines.js`) and drawn as line traces: a redraw takes 0.1–0.15 s
+  (with Plotly contour traces 0.55–1.3 s).
 
-- **One excitation for all views** (Plot Options → *Excitation*): voltage per
-  conductor, voltage between the conductors of a pair, current per conductor
-  or total power, peak or RMS. The solver's unit fields (E and potential for
-  1 V, H and J for 1 A, the waveguide for 1 W) are scaled by the complex
-  amplitudes V and I = V/Z<sub>c</sub> of the plotted mode at the field
-  frequency (Z<sub>c</sub> interpolated in the sweep), so H carries the phase
-  of Z<sub>c</sub> on a lossy line. The title shows V, I and P. Before, E was
-  for 1 V and H for 1 A, so the two views differed by a factor Z<sub>c</sub>,
-  and the power flow had to be renormalized to 1 W and the sign of E fixed by
-  hand; now ½Re(E × H*) integrates to the predicted power directly
-  (0.1–0.6 % for microstrip, differential pair odd / even, coax, waveguide).
-- **One time display for all views**: *Peak amplitude* or *Instantaneous at
-  ωt* now applies to potential, |E|, the arrows and S as well (S pulsates at
-  2ω). In the instantaneous display the color scale and the line spacing stay
-  those of the peak, so the fields shrink and the lines thin out as ωt runs
-  (before, every phase was rescaled to the full color range, so at ωt = 90°
-  the small residual looked like a full field). ▶ runs through ωt.
-- **Line termination** (matched, open, short, Z<sub>L</sub>) and the distance
-  from the load in wavelengths: the cross-section of a standing wave,
-  V(d) = V⁺(1 + Γe<sup>−j4πd/λ</sup>), I(d) = I⁺(1 − Γe<sup>−j4πd/λ</sup>).
-  On a matched line E and H are in phase (both zero at ωt = 90°); λ/8 from an
-  open end they are 90° apart and alternate. The help text explains the
-  difference. TEM lines only.
-- **Field lines and contour lines per view** (Plot Options → *Field lines*,
-  *Contour lines*, *Contours show*):
-  - Geometry, Potential, |E|: electric field lines and equipotentials (they
-    cross at right angles). Before, the |E| view and the geometry overlay drew
-    lines of equal |E|, which look like equipotentials but are not; they are
-    still available as *|E| levels*. Field lines are now also drawn in
-    the potential and |E| views.
-  - Field lines start at points of equal electric FLUX (weighted by
-    ε·E<sub>n</sub>, the surface charge, over all signal conductors), so
-    every line carries the same charge. Before, they were weighted by
-    E<sub>n</sub> and distributed by perimeter, which gave conductor faces in
-    the substrate ε<sub>r</sub> times too few lines. A line between the two
-    conductors of a pair is drawn once (before twice), lines stop in
-    field-free regions (before, some ran straight to the domain corners).
-  - |H|: H field lines (contours of A<sub>z</sub>) unchanged, with levels from
-    the peak field.
-  - Current J: no lines (J points along the line). Power flow: 50 / 90 / 99 %
-    lines.
-  - Coax: radial E lines and circular equipotentials from the closed form;
-    waveguide: TE10 / TE01 E lines between the broad walls, spaced by equal
-    flux (density ∝ sin(πx/a)).
-- **Coax |E| and potential from the closed form**, drawn as rings like H and
-  J. The resampled FEM field of a round conductor had |E| spikes of about 200×
-  the surface field at the inner conductor (an unmeshed conductor interior
-  read 0 V instead of 1 V in the difference stencil), which pushed the color
-  scale up so the plot looked black, removed the contours and showed the inner
-  conductor at 0 V in the potential view. Fixed in the resampler as well
-  (used by the arrows and the power flow): |E| within 1 % of V/(r·ln(b/a))
-  from 2 % of the radius off the surface.
-- **Waveguide |E|** from the closed-form mode scaled by the power (before the
-  arbitrarily scaled eigenvector, so its V/m values meant nothing).
-- **Conductors no longer cover arrows and lines**: the conductor fill is drawn
-  below the traces with its outline on top, the field maps leave the metal
-  empty (no dark rim at the edges). The |E| color range ends at the
-  area-weighted 99.99th percentile instead of the singular corner value
-  (quasi-static grid: 98 kV/m → 9 kV/m for the default microstrip at 1 V).
-- **Arrow selection in the plot**, next to the view and mode selectors.
-- **Potential view**: the conductors keep their potential in the color map
-  (each is an equipotential at its drive voltage), only their outlines are
-  drawn on top.
-- **E arrows next to a conductor** are shortened so they do not reach into the
-  metal (E is zero there), or dropped.
-- **Redraw speed**: contour lines (equipotentials, H field lines, power lines,
-  |E| levels) are computed with a marching-squares pass of our own
-  (`src/isolines.js`, joined into polylines) and drawn as line traces. Plotly
-  contour traces re-contoured the whole grid with smoothing on every redraw,
-  once per trace: a redraw of the power flow view took 1.3 s, of the |H| view
-  0.55 s; now 0.1–0.15 s.
-- **Power flow S sign**: in a matched or lossy travelling wave S<sub>z</sub> is
-  positive everywhere, so the S view uses a one-sided scale (log in the
-  instantaneous display too). A signed scale is used only for a standing wave
-  or when S<sub>z</sub> really turns negative, where the instantaneous power
-  flows back and forth; the containment lines are then left out. The
-  conductors are drawn filled in the S view (no power flows inside).
-- **Scale dialog** (click on the color bar) shows the real values and the unit
-  also for log scales (it showed the log10 exponents).
-- **Color maps** reviewed for color-vision deficiency, all perceptually
-  uniform with lightness growing with the value: Viridis for potential, |E|,
-  |H|; Inferno for J; Magma for S; signed values (instantaneous display,
-  standing waves) use a diverging map that is dark at zero (after Crameri's
-  *berlin*), blue negative and red positive, so a zero field stays dark on the
-  dark background instead of lighting up white. Light solid field lines get a
-  thin dark seam for contrast on the light end of the maps.
+**Color maps**, all perceptually uniform with lightness growing with the value,
+readable with colour-vision deficiency and in greyscale: Viridis for |E| and
+|H|, Inferno for |J|, Electric (black → violet → amber → cream) for S, Magma for
+the losses, and for signed values (potential, J<sub>z</sub> linear) a diverging
+map that is dark at zero (after Crameri's *berlin*), blue negative and red
+positive. Light solid field lines get a thin dark seam for contrast. Log color
+bars are labelled with real values; the **scale dialog** (click on the color
+bar) also shows real values and the unit.
+
+**Other fixes**
+
+- Coax |E|: the resampled FEM field of a round conductor had |E| spikes of
+  about 200× the surface field at the inner conductor (an unmeshed conductor
+  interior read 0 V in the difference stencil). Fixed in the resampler (used by
+  the arrows and the power flow); the coax views use the closed form.
+- Waveguide |E| from the closed-form mode scaled by the power (before the
+  arbitrarily scaled eigenvector).
+- Conductors no longer cover arrows and lines: the conductor fill is drawn
+  below the traces with its outline (in the conductor color) on top. The
+  linear |E| color range ends at the area-weighted 99.99th percentile instead
+  of the singular corner value.
+
+**Removed for teaching (2026-10-02).** An intermediate version also had an
+instantaneous time display (phase ωt, ▶ animation) and line terminations
+(open, short, Z<sub>L</sub>: the cross-section of a standing wave). Both were
+removed again: a termination only changes the amplitudes of E and H at a
+position, not the shape of the fields in the cross-section, and standing waves
+are taught better along the line (1D, Smith chart, TDR); on the matched line
+the time display adds little beyond "E and H are in phase", while its
+switching color scales (signed, one-sided, log or not) confused more than they
+showed.
 
 ### How the fields are computed
 
@@ -169,10 +162,9 @@ J(s) = K·γ·cosh(γ(d − s)) / sinh(γd), γ = (1 + j)/δ.
 
 ### Limitations
 
-- H, J and S need the Full-wave solver. The quasi-static solver does not mesh
-  the conductor interiors (its potential, |E|, field lines and E arrows work).
-- The standing wave neglects the attenuation over the distance from the load
-  and is not offered for the waveguide.
+- H, J, S and the losses need the Full-wave solver. The quasi-static solver
+  does not mesh the conductor interiors (its potential, |E|, field lines and E
+  arrows work).
 - The coax shield is modelled as infinitely thick, as in the solver. Its
   profile uses the large-argument form of the exact solution (accurate for
   δ ≪ shield radius); the net shield current is exactly −1 A either way.
@@ -181,30 +173,36 @@ J(s) = K·γ·cosh(γ(d − s)) / sinh(γd), γ = (1 + j)/δ.
   return current distribution (PCB copper: above a few MHz). At lower
   frequencies the lateral spreading of the return current is not modelled.
 - Plating and roughness are post-processing in the loss calculation. The
-  plotted current is that of the smooth bulk metal.
+  plotted current and loss density are those of the smooth bulk metal; the
+  loss totals in the title include them.
+- The loss map uses the nominal ε<sub>r</sub> and tanδ of each dielectric
+  (with causal materials the solver's values vary with frequency). Integrating
+  the metal part of the map on the plot grid overestimates the conductor loss
+  where the grid does not resolve the skin depth, so the totals come from the
+  solver.
 
 ## Files
 
 | File | Change |
 |---|---|
 | `src/tri_solver/analytic_fields.js` | **New.** Closed-form coax and waveguide fields (H, J, and the waveguide's transverse E), complex Bessel J0/J1 (scaled, overflow-free in the skin-effect regime) |
-| `src/tri_solver/mqs_field.js` | **New.** Resamples H, J and A from the MQS solution onto the plot grid, wall slab current, grid with skin-depth and face lines |
-| `src/tri_solver/mqs_loss.js` | `mqsConductorLoss(…, { returnField: true })` exports the normalized solution |
+| `src/tri_solver/mqs_field.js` | **New.** Resamples H, J, A and the loss density ½\|J\|²/σ from the MQS solution onto the plot grid, wall slab current, grid with skin-depth and face lines |
+| `src/tri_solver/mqs_loss.js` | `mqsConductorLoss(…, { returnField: true })` exports the normalized solution and the trace / ground split of the loss |
 | `src/tri_solver/tri_backend.js` | `TriBackend.mqsFieldAt(f, mode)` runs an exact MQS solve and resamples the fields |
 | `src/tri_solver/resample.js` | `buildLocator` exported; unmeshed conductor interiors take the conductor potential, the E stencil does not straddle a curved conductor surface |
-| `src/field_views.js` | **New.** All field views (potential, \|E\|, \|H\|, J, S, coax and waveguide variants), field lines, equipotentials, power-containment lines, arrows, scaled by the excitation |
-| `src/field_excitation.js` | **New.** Voltage / current / power conversion over Z<sub>c</sub>, standing wave, impedance parser |
+| `src/field_views.js` | **New.** All field views (potential, \|E\|, \|H\|, J, S, losses, coax and waveguide variants), color scales, field lines, equipotentials, power-containment lines, arrows, scaled by the excitation |
+| `src/field_excitation.js` | **New.** Voltage / current / power conversion over Z<sub>c</sub>, label formatting |
 | `src/isolines.js` | **New.** Marching-squares contour lines joined into polylines (all field views) |
 | `src/streamlines.js` | Rewritten: flux-weighted seeding over all signal conductors, adaptive RK4 tracing, de-duplicated lines between conductors |
 | `src/solve_worker.js` | New `mqsField` job, keeps the last simulation's solver |
-| `src/plot.js` | New views and arrows (builders in `field_views.js`), excitation and time settings, arrow menu in the plot, conductors below the traces |
-| `src/app_solver.js` | On-demand field request, scale dialog types, plot option handlers, ▶ animation, termination controls |
-| `src/field_solver.html` | Plot options, help texts, fork notice in the About tab |
+| `src/plot.js` | New views and arrows (builders in `field_views.js`), excitation, menu row in the plot (view, log / linear, arrows, odd / even), attenuation for the losses view, conductors below the traces |
+| `src/app_solver.js` | On-demand field request, scale dialog types (real values for log scales), plot option handlers |
+| `src/field_solver.html` | Plot options, help texts, fork notice in the About tab, Full-wave solver as the default |
 | `tests/test_mqs_field.js` | **New.** 18 checks: current normalization (exact FEM integral), Ampère's law ±1 A per trace for every MQS path (single-ended, odd/even on half and full domain, stripline), uniform current at 100 kHz, skin decay length = δ at 10 GHz, wall slab current, refusals |
 | `tests/test_analytic_fields.js` | **New.** 12 checks: Bessel reference values, coax ±1 A and DC limit, R from the plotted coax current vs the solver's R (1 and 10 GHz), waveguide 1 W normalization, α<sub>c</sub> from the plotted wall current vs the solver's α<sub>c</sub>, below-cutoff refusal |
-| `tests/test_field_excitation.js` | **New.** 30 checks: V / I / P conversion (peak, RMS, lossy Z<sub>c</sub>, differential), standing wave (open, short, λ/8 alternation), impedance parser |
+| `tests/test_field_excitation.js` | **New.** V / I / P conversion (peak, RMS, lossy Z<sub>c</sub>, differential), waveguide, label formatting |
 | `tests/test_field_lines.js` | **New.** 11 checks: flux-weighted seeding with a dielectric, de-duplicated lines between two conductors, coax \|E\| on the plot grid vs the closed form, contour lines (closed, on the circle, ending at masked cells) |
-| `tests/test_field_views.js` | **New.** 10 checks: ∫S dA = n·½Re(V·I*) for microstrip (1 V, 1 W), pair odd / even, coax, waveguide; fixed scale of the instantaneous display; standing-wave power |
+| `tests/test_field_views.js` | **New.** 15 checks: ∫S dA = n·½Re(V·I*) for microstrip (1 V, 1 W), pair odd / even, coax, waveguide; color scales (potential symmetric, \|E\| log, J signed); losses against 2αP (microstrip dielectric, coax conductor and dielectric) |
 | `tests/run.mjs` | New tests registered in the fast tier |
 | `src/snp_export.js` | Touchstone header names the hosted version and the original |
 | `deploy/make_site.mjs`, `deploy/htaccess`, `deploy/index.html` | **New.** Upload folder for the hosted version |
@@ -221,7 +219,8 @@ J(s) = K·γ·cosh(γ(d − s)) / sinh(γd), γ = (1 + j)/δ.
   matches the solver's α<sub>c</sub> (0.1084 dB/m for WR-90 at 10 GHz).
 - `node tests/test_field_views.js`: ∫S dA matches n·½Re(V·I*) within 0.53 %
   (microstrip), 0.31 / 0.14 % (pair odd / even), 0.01 % (coax), 0.00 %
-  (waveguide).
+  (waveguide); the loss map matches 2α<sub>d</sub>P within 0.1 % (microstrip)
+  and 2α<sub>c</sub>P / 2α<sub>d</sub>P within 0.9 / 0.2 % (coax).
 - `npm run test:fast`: same result as upstream at `318300a`. The only failure,
   `complex_symmetric_test.mjs`, is a test file that is registered upstream but
   missing from the repository.

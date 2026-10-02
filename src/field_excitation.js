@@ -14,13 +14,8 @@
 //   cH = I / 1 A   multiplies H and J,
 // and P = n·½·Re(V·I*) is the transmitted power (n = 2 signal conductors for a
 // differential pair, the time average). The waveguide has no unique V and I, only
-// cE = cH = √(P / 1 W).
-//
-// A termination turns the matched (travelling) wave into a standing wave. With the
-// incident wave as reference and d the distance from the load (d/λ in wavelengths):
-//   V(d) = V⁺·(1 + Γ·e^(−j4πd/λ)),   I(d) = I⁺·(1 − Γ·e^(−j4πd/λ)),
-// Γ = (Z_L − Zc)/(Z_L + Zc). Matched: V = V⁺, I = I⁺ everywhere, E and H in phase.
-// Open end (Γ = 1) at d = λ/8: V = V⁺(1 − j), I = I⁺(1 + j), 90° apart.
+// cE = cH = √(P / 1 W). The line is matched: one travelling wave, V and I the same
+// everywhere along it.
 
 export const c = (re, im = 0) => ({ re, im });
 export const cmul = (a, b) => c(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
@@ -31,9 +26,6 @@ export const cdiv = (a, b) => {
 export const cconj = (a) => c(a.re, -a.im);
 export const cabs = (a) => Math.hypot(a.re, a.im);
 export const carg = (a) => Math.atan2(a.im, a.re);
-export const cscale = (a, s) => c(a.re * s, a.im * s);
-// Re{a·e^(jωt)}: the instantaneous value of phasor a at phase ωt (rad).
-export const inst = (a, wt) => a.re * Math.cos(wt) - a.im * Math.sin(wt);
 
 /**
  * Complex amplitudes of the incident wave for one excitation setting.
@@ -85,58 +77,6 @@ export function excitation({ kind, value, rms = false, Zc, nCond = 1, mode = 'si
     if (!V || !I) return { ok: false, note: 'The line impedance is not available.' };
     const P = nCond * 0.5 * cmul(V, cconj(I)).re;
     return { ok: true, waveguide: false, V, I, P, cE: V, cH: I, kind: k, note };
-}
-
-// Reflection coefficient of a termination.
-export function reflection(load, Zc, ZL) {
-    if (load === 'open') return c(1);
-    if (load === 'short') return c(-1);
-    if (load === 'custom' && ZL && Zc) {
-        return cdiv(c(ZL.re - Zc.re, ZL.im - Zc.im), c(ZL.re + Zc.re, ZL.im + Zc.im));
-    }
-    return c(0);
-}
-
-// Voltage and current d/λ from the load for incident amplitudes V⁺, I⁺ (see header).
-export function standingWave(Vp, Ip, gamma, dOverLambda) {
-    const ph = -4 * Math.PI * dOverLambda;
-    const ge = cmul(gamma, c(Math.cos(ph), Math.sin(ph)));
-    return {
-        V: cmul(Vp, c(1 + ge.re, ge.im)),
-        I: cmul(Ip, c(1 - ge.re, -ge.im)),
-    };
-}
-
-// "50", "50 + 20j", "25-10i", "j30" → {re, im} or null.
-export function parseImpedance(s) {
-    if (s === null || s === undefined) return null;
-    let t = String(s).replace(/\s+/g, '').replace(/ohm|Ω/gi, '').replace(/i/g, 'j').toLowerCase();
-    if (!t) return null;
-    // Split into signed terms at + / − that do not belong to an exponent.
-    const terms = [];
-    let cur = '';
-    for (let k = 0; k < t.length; k++) {
-        const ch = t[k];
-        if ((ch === '+' || ch === '-') && k > 0 && t[k - 1] !== 'e') { terms.push(cur); cur = ch; }
-        else cur += ch;
-    }
-    terms.push(cur);
-    let re = 0, im = 0;
-    for (let term of terms) {
-        if (!term) return null;
-        if (term.includes('j')) {
-            const sign = term[0] === '-' ? -1 : 1;
-            const mag = term.replace(/^[+-]/, '').replace('j', '');
-            const v = mag === '' ? 1 : Number(mag);
-            if (!Number.isFinite(v)) return null;
-            im += sign * v;
-        } else {
-            const v = Number(term);
-            if (!Number.isFinite(v)) return null;
-            re += v;
-        }
-    }
-    return c(re, im);
 }
 
 // SI formatting for labels: 0.0199 → "19.9 m", with the unit appended.
