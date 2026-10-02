@@ -501,6 +501,31 @@ function updateArrows() {
                                     'marker.symbol': [(d.S && d.S.symbol) || 'circle-open-dot'] }, [sIdx]);
     }
 }
+// Menu row with fixed gaps in pixels: Plotly places menus at fractions of the plot
+// width, so fixed fractions spread them apart in a wide window. Measures the drawn
+// menus and moves them next to each other (the odd / even mode after a wider gap).
+const MENU_GAP_PX = 6, MODE_GAP_PX = 28;
+function packMenus(container) {
+    const Plotly = getPlotly();
+    const fl = container && container._fullLayout;
+    if (!Plotly || !fl || !fl.updatemenus || !fl.updatemenus.length || !(fl._size && fl._size.w > 0)) return;
+    const heads = container.querySelectorAll('.updatemenu-header-group');
+    if (heads.length !== fl.updatemenus.length) return;
+    const w = fl._size.w;
+    const upd = {};
+    let px = 0;
+    fl.updatemenus.forEach((m, k) => {
+        if (k > 0) px += m.name === 'mode' ? MODE_GAP_PX : MENU_GAP_PX;
+        const x = px / w;
+        if (Math.abs(m.x - x) > 1e-4 || m.xanchor !== 'left') {
+            upd[`updatemenus[${k}].x`] = x;
+            upd[`updatemenus[${k}].xanchor`] = 'left';
+        }
+        px += heads[k].getBoundingClientRect().width;
+    });
+    if (Object.keys(upd).length) Plotly.relayout(container, upd);
+}
+
 // Get actual data range (before any user scaling)
 function getActualDataRange() {
     return { min: actualDataMin, max: actualDataMax };
@@ -699,8 +724,10 @@ function draw(resetZoom = false) {
         }
     }
 
-    // Menu row above the plot area: view, log / linear scale and arrows on the left, the
-    // odd / even mode of a differential pair on the right. The title sits above them.
+    // Menu row above the plot area: view, log / linear scale, arrows and, after a wider
+    // gap, the odd / even mode of a differential pair. The title sits above them. The x
+    // positions here are only a first guess; packMenus() sets fixed pixel gaps once the
+    // menus are drawn and their widths are known.
     const menuBase = { y: 1.01, yanchor: 'bottom', xanchor: 'left', showactive: true,
                        bgcolor: '#2a2a2a', bordercolor: '#444', font: { color: '#aaa' }, pad: { t: 0, b: 2 } };
     const titleText = subtitle
@@ -772,7 +799,7 @@ function draw(resetZoom = false) {
 
             // Odd / even mode of a differential pair, set apart on the right.
             if (isDifferentialMode()) {
-                menus.push({ ...menuBase, name: 'mode', x: 1.0, xanchor: 'right', active: getSelectedModeIndex(),
+                menus.push({ ...menuBase, name: 'mode', x: 0.5, active: getSelectedModeIndex(),
                     buttons: [{ label: "Odd Mode", method: "skip", args: [] },
                               { label: "Even Mode", method: "skip", args: [] }] });
             }
@@ -802,6 +829,16 @@ function draw(resetZoom = false) {
     };
 
     Plotly.react(container, traces, layout, config);
+    packMenus(container);
+    if (!window._packMenusBound) {
+        // The positions are fractions of the plot width: re-pack when the window resizes.
+        let t = null;
+        window.addEventListener('resize', () => {
+            clearTimeout(t);
+            t = setTimeout(() => packMenus(document.getElementById('sim_canvas')), 150);
+        });
+        window._packMenusBound = true;
+    }
     if (arrowTr.length) updateArrows();
     if (!container._arrowListenerBound) {
         container.on('plotly_relayout', (ev) => {
