@@ -423,10 +423,12 @@ function outlineShapes(solver, maxY) {
 // Conductor fills BELOW the traces (field lines and arrows stay visible on top of the
 // metal; the field heatmaps leave the metal empty) with their outline on top.
 function conductorLayerShapes(solver, maxY) {
-    const fills = conductorFillShapes(solver, maxY).map(s => ({ ...s, layer: 'between' }));
+    const fills = conductorFillShapes(solver, maxY).map(s => ({ ...s, layer: 'between',
+        line: s.fillcolor && s.fillcolor !== 'rgba(0,0,0,0)' ? { color: s.fillcolor, width: 0 } : s.line }));
     const outlines = conductorFillShapes(solver, maxY)
         .filter(s => s.fillcolor !== 'rgba(0,0,0,0)')
-        .map(s => ({ ...s, fillcolor: 'rgba(0,0,0,0)', line: { color: 'rgba(0, 0, 0, 0.6)', width: 1 }, layer: 'above' }));
+        // In the conductor color: a crisp edge over field lines and arrows, no dark rim.
+        .map(s => ({ ...s, fillcolor: 'rgba(0,0,0,0)', line: { color: s.fillcolor, width: 1 }, layer: 'above' }));
     return [...fills, ...outlines];
 }
 
