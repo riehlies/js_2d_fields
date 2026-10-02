@@ -601,6 +601,9 @@ function draw(resetZoom = false) {
         if (view === 'hfield' || view === 'jfield' || view === 'sfield') {
             // The field lives inside the metal too: outlines only.
             shapes.push(...outlineShapes(solver, Math.max(maxY, yTop)));
+        } else if (view === 'potential') {
+            // The conductors carry their potential in the color map: outlines only.
+            shapes.push(...outlineShapes(solver, Math.max(maxY, yTop)));
         } else {
             shapes.push(...dielectricFillShapes(solver, Math.max(maxY, yTop), {
                 alpha: 0, airAlpha: 0, layer: 'above', lineColor: 'rgba(200, 200, 200, 0.3)' }));

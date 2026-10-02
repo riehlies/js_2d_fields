@@ -94,7 +94,7 @@ Cross-check: for the default microstrip (εr = 4.4, ε<sub>eff</sub> = 3.229)
   - Geometry, Potential, |E|: electric field lines and equipotentials (they
     cross at right angles). Before, the |E| view and the geometry overlay drew
     lines of equal |E|, which look like equipotentials but are not; they are
-    still available as *Magnitude levels*. Field lines are now also drawn in
+    still available as *|E| levels*. Field lines are now also drawn in
     the potential and |E| views.
   - Field lines start at points of equal electric FLUX (weighted by
     ε·E<sub>n</sub>, the surface charge, over all signal conductors), so
@@ -105,7 +105,8 @@ Cross-check: for the default microstrip (εr = 4.4, ε<sub>eff</sub> = 3.229)
     field-free regions (before, some ran straight to the domain corners).
   - |H|: H field lines (contours of A<sub>z</sub>) unchanged, with levels from
     the peak field.
-  - Current J: optional |J| levels. Power flow: 50 / 90 / 99 % lines.
+  - Current J: no lines (J points along the line). Power flow: 50 / 90 / 99 %
+    lines.
   - Coax: radial E lines and circular equipotentials from the closed form;
     waveguide: TE10 / TE01 E lines between the broad walls, spaced by equal
     flux (density ∝ sin(πx/a)).
@@ -125,6 +126,17 @@ Cross-check: for the default microstrip (εr = 4.4, ε<sub>eff</sub> = 3.229)
   area-weighted 99.99th percentile instead of the singular corner value
   (quasi-static grid: 98 kV/m → 9 kV/m for the default microstrip at 1 V).
 - **Arrow selection in the plot**, next to the view and mode selectors.
+- **Potential view**: the conductors keep their potential in the color map
+  (each is an equipotential at its drive voltage), only their outlines are
+  drawn on top.
+- **E arrows next to a conductor** are shortened so they do not reach into the
+  metal (E is zero there), or dropped.
+- **Redraw speed**: contour lines (equipotentials, H field lines, power lines,
+  |E| levels) are computed with a marching-squares pass of our own
+  (`src/isolines.js`, joined into polylines) and drawn as line traces. Plotly
+  contour traces re-contoured the whole grid with smoothing on every redraw,
+  once per trace: a redraw of the power flow view took 1.3 s, of the |H| view
+  0.55 s; now 0.1–0.15 s.
 
 ### How the fields are computed
 
@@ -167,6 +179,7 @@ J(s) = K·γ·cosh(γ(d − s)) / sinh(γd), γ = (1 + j)/δ.
 | `src/tri_solver/resample.js` | `buildLocator` exported; unmeshed conductor interiors take the conductor potential, the E stencil does not straddle a curved conductor surface |
 | `src/field_views.js` | **New.** All field views (potential, \|E\|, \|H\|, J, S, coax and waveguide variants), field lines, equipotentials, power-containment lines, arrows, scaled by the excitation |
 | `src/field_excitation.js` | **New.** Voltage / current / power conversion over Z<sub>c</sub>, standing wave, impedance parser |
+| `src/isolines.js` | **New.** Marching-squares contour lines joined into polylines (all field views) |
 | `src/streamlines.js` | Rewritten: flux-weighted seeding over all signal conductors, adaptive RK4 tracing, de-duplicated lines between conductors |
 | `src/solve_worker.js` | New `mqsField` job, keeps the last simulation's solver |
 | `src/plot.js` | New views and arrows (builders in `field_views.js`), excitation and time settings, arrow menu in the plot, conductors below the traces |
@@ -175,7 +188,7 @@ J(s) = K·γ·cosh(γ(d − s)) / sinh(γd), γ = (1 + j)/δ.
 | `tests/test_mqs_field.js` | **New.** 18 checks: current normalization (exact FEM integral), Ampère's law ±1 A per trace for every MQS path (single-ended, odd/even on half and full domain, stripline), uniform current at 100 kHz, skin decay length = δ at 10 GHz, wall slab current, refusals |
 | `tests/test_analytic_fields.js` | **New.** 12 checks: Bessel reference values, coax ±1 A and DC limit, R from the plotted coax current vs the solver's R (1 and 10 GHz), waveguide 1 W normalization, α<sub>c</sub> from the plotted wall current vs the solver's α<sub>c</sub>, below-cutoff refusal |
 | `tests/test_field_excitation.js` | **New.** 30 checks: V / I / P conversion (peak, RMS, lossy Z<sub>c</sub>, differential), standing wave (open, short, λ/8 alternation), impedance parser |
-| `tests/test_field_lines.js` | **New.** 8 checks: flux-weighted seeding with a dielectric, de-duplicated lines between two conductors, coax \|E\| on the plot grid vs the closed form |
+| `tests/test_field_lines.js` | **New.** 11 checks: flux-weighted seeding with a dielectric, de-duplicated lines between two conductors, coax \|E\| on the plot grid vs the closed form, contour lines (closed, on the circle, ending at masked cells) |
 | `tests/test_field_views.js` | **New.** 10 checks: ∫S dA = n·½Re(V·I*) for microstrip (1 V, 1 W), pair odd / even, coax, waveguide; fixed scale of the instantaneous display; standing-wave power |
 | `tests/run.mjs` | New tests registered in the fast tier |
 | `src/snp_export.js` | Touchstone header names the hosted version and the original |

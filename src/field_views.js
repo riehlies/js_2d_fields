@@ -28,6 +28,7 @@
 
 import { shapeContains, isComplement, svgRingPath } from './shapes.js';
 import { electricFieldLines } from './streamlines.js';
+import { isoLines } from './isolines.js';
 import { c, cmul, cconj, cabs, carg, inst } from './field_excitation.js';
 
 // ---- shared color scales (Plotly's definitions), used where colors are computed here ----
@@ -152,24 +153,20 @@ export function isWaveguide(solver) {
 }
 
 // Contour lines of z at the levels m·step (m ≠ 0) up to ±maxAbs, plus the zero level if
-// asked: one trace per sign so a contour never runs along the masked metal edges where
-// z = 0. Levels from the PEAK field, so in the instantaneous display the lines thin out.
+// asked (not by default: for a single-ended line z = 0 is the ground, and a zero contour
+// would trace the masked metal edges). Levels from the PEAK field, so in the instantaneous
+// display the lines thin out. One line trace (isolines.js), not a Plotly contour trace,
+// which would re-contour the whole grid on every redraw.
 function levelTraces(xMM, yMM, z, step, maxAbs, { zero = false, line, name, legend = true }) {
-    const out = [];
-    if (!(step > 0) || !(maxAbs > 0)) return out;
+    if (!(step > 0) || !(maxAbs > 0)) return [];
     const K = Math.floor(maxAbs / step - 1e-9);
-    const base = { type: 'contour', x: xMM, y: yMM, z, showscale: false, hoverinfo: 'skip',
-                   line: { ...line, smoothing: 1.0 }, contours: { coloring: 'none', showlines: true } };
-    if (K >= 1) {
-        out.push({ ...base, contours: { ...base.contours, start: step, end: K * step, size: step } });
-        out.push({ ...base, contours: { ...base.contours, start: -K * step, end: -step, size: step } });
-    }
-    if (zero) out.push({ ...base, contours: { ...base.contours, start: 0, end: 0, size: step } });
-    if (out.length) {
-        out[0].name = name; out[0].showlegend = legend; out[0].legendgroup = name;
-        for (const t of out.slice(1)) { t.showlegend = false; t.legendgroup = name; }
-    }
-    return out;
+    const levels = [];
+    for (let m = 1; m <= K; m++) levels.push(m * step, -m * step);
+    if (zero) levels.push(0);
+    if (!levels.length) return [];
+    const l = isoLines(xMM, yMM, z, levels);
+    if (!l.x.length) return [];
+    return [{ type: 'scatter', mode: 'lines', x: l.x, y: l.y, line, hoverinfo: 'skip', name, showlegend: legend }];
 }
 
 // ---- unit-field samplers -----------------------------------------------------------
@@ -395,6 +392,15 @@ function coaxStaticView(env, isE) {
     const colorbar = { title: { text: unit }, len: 0.8 };
     const R = (b + (solver.shield_thickness || 0.1 * b)) * 1000;
     const shapes = ringShapes(rings, vals, scale, zmin, zmax, 0, 0);
+    if (!isE) {
+        // Conductors at their potential: inner conductor s, shield 0.
+        const col = (v) => colorAt(scale, (v - zmin) / ((zmax - zmin) || 1));
+        const am = a * 1000;
+        shapes.push({ type: 'circle', xref: 'x', yref: 'y', x0: -am, y0: -am, x1: am, y1: am,
+            fillcolor: col(s), line: { width: 0, color: 'rgba(0,0,0,0)' }, layer: 'between' });
+        shapes.push({ type: 'path', path: svgRingPath(0, 0, b * 1000, R, 360), fillcolor: col(0), fillrule: 'evenodd',
+            line: { width: 0, color: 'rgba(0,0,0,0)' }, layer: 'between' });
+    }
     const traces = [...ringTraces(rings, vals, R, 0, 0, isE ? '|E|' : 'V', unit, scale, zmin, zmax, colorbar),
                     ...coaxLineTraces(env, false)];
     return { traces, shapes, zMin: zmin, zMax: zmax, dataMin, dataMax, xMM: [-R, R], yMM: [-R, R],
@@ -479,9 +485,11 @@ function staticView(env, isE) {
         // same scale for the graded quasi-static grid and the full-wave resampling).
         zmin = 0; zmax = amp * weightedPercentile(all, wts, 0.9999);
     } else {
+        // The potential is defined in the conductors too (each is an equipotential at
+        // its drive voltage), so they keep their color here.
         let vmin = Infinity, vmax = -Infinity;
-        z = env.V.map((row, j) => Array.from(row, (v, i) => {
-            if (mask[j][i]) return null;
+        z = env.V.map((row) => Array.from(row, (v) => {
+            if (!Number.isFinite(v)) return null;
             if (v < vmin) vmin = v; if (v > vmax) vmax = v;
             return s * v;
         }));
@@ -510,13 +518,11 @@ function magnitudeContourTrace(xMM, yMM, z, amp, unitMax, s, n) {
     const eMax = amp * unitMax;
     const lo = Math.log10(Math.max(eMax * 1e-2, 1e-30)), hi = Math.log10(Math.max(eMax, 1e-30));
     const size = (hi - lo) / n;
-    return {
-        type: 'contour', x: xMM, y: yMM,
-        z: z.map(row => row.map(v => (v === null ? null : Math.log10(Math.max(v, 1e-30))))),
-        contours: { showlines: true, coloring: 'none', start: lo + size / 2, end: hi, size },
-        line: { width: 1, color: 'rgba(255, 255, 255, 0.35)', smoothing: 1.0 },
-        showscale: false, hoverinfo: 'skip', name: '|E| levels', showlegend: true,
-    };
+    const levels = Array.from({ length: n }, (_, k) => lo + size / 2 + k * size);
+    const lz = z.map(row => row.map(v => (v === null || !(v > 0) ? null : Math.log10(v))));
+    const l = isoLines(xMM, yMM, lz, levels);
+    return { type: 'scatter', mode: 'lines', x: l.x, y: l.y, hoverinfo: 'skip',
+             line: { width: 1, color: 'rgba(255, 255, 255, 0.35)' }, name: '|E| levels', showlegend: true };
 }
 
 // ---- |H| and current density ---------------------------------------------------------
@@ -581,11 +587,6 @@ function mqsView(env, isH) {
         traces.push(quiverTrace(f, cH, opt, opt.nLines));
     }
     if (isH && opt.nLines > 0 && f.Ar) traces.push(...hFieldLines(env, cH, xMM, yMM));
-    if (!isH && opt.nContours > 0 && opt.contourKind === 'mag') {
-        const zz = raw.map(row => row.map(v => (v === null ? null : Math.abs(v))));
-        traces.push(...levelTraces(xMM, yMM, zz, p99 / (opt.nContours + 1), p99,
-            { line: { color: 'rgba(255, 255, 255, 0.4)', width: 1 }, name: '|J| levels' }));
-    }
     const per = f.kind === 'wg' ? ` · ${f.mode}` : (f.differential ? (f.mode === 'even' ? ' · even mode' : ' · odd mode') : '');
     const title = `${qty}${timeLabel(opt)}${per} · δ = ${formatLength(f.delta)}`;
     return { traces, shapes: [], zMin: zmin, zMax: zmax, dataMin, dataMax, title, xMM, yMM };
@@ -819,10 +820,9 @@ function containmentTraces(xMM, yMM, avg, cells, total) {
         acc += p;
         while (ci < CONTAIN.length && acc >= CONTAIN[ci][0] * total) {
             const [, dash, name] = CONTAIN[ci];
-            out.push({ type: 'contour', x: xMM, y: yMM, z: avg, showscale: false, hoverinfo: 'skip',
-                contours: { coloring: 'none', showlines: true, start: v * 1e-6, end: v * 1e-6, size: 1 },
-                line: { color: 'rgba(120, 220, 255, 0.9)', width: 1.4, dash, smoothing: 1.0 },
-                name, showlegend: true });
+            const l = isoLines(xMM, yMM, avg, [v * 1e-6]);
+            out.push({ type: 'scatter', mode: 'lines', x: l.x, y: l.y, hoverinfo: 'skip',
+                line: { color: 'rgba(120, 220, 255, 0.9)', width: 1.4, dash }, name, showlegend: true });
             ci++;
         }
         if (ci >= CONTAIN.length) break;
@@ -980,8 +980,21 @@ export function buildArrowData(env, arrows, xr, yr) {
             if (L < 0.08 * Lcell) return;
             const ux = ix / im, uy = iy / im;
             const [x, y] = pts[idx];
-            const xa = x - 0.5 * L * ux, ya = y - 0.5 * L * uy, xb = x + 0.5 * L * ux, yb = y + 0.5 * L * uy;
-            const hl = 0.35 * L, ca = Math.cos(Math.PI / 7), sa = Math.sin(Math.PI / 7);
+            // E is zero inside metal: an E arrow next to a conductor is shortened until it
+            // no longer reaches into it, or dropped.
+            let Lc = L;
+            if (k === 'E') {
+                const hits = (len) => {
+                    for (let t = -0.5; t <= 0.5; t += 0.125) {
+                        if (inMetal((x + t * len * ux) / 1000, (y + t * len * uy) / 1000)) return true;
+                    }
+                    return false;
+                };
+                while (Lc >= 0.08 * Lcell && hits(Lc)) Lc *= 0.7;
+                if (Lc < 0.08 * Lcell) return;
+            }
+            const xa = x - 0.5 * Lc * ux, ya = y - 0.5 * Lc * uy, xb = x + 0.5 * Lc * ux, yb = y + 0.5 * Lc * uy;
+            const hl = 0.35 * Lc, ca = Math.cos(Math.PI / 7), sa = Math.sin(Math.PI / 7);
             X.push(xa, xb, null, xb, xb + hl * (-ux * ca + uy * sa), null, xb, xb + hl * (-ux * ca - uy * sa), null);
             Y.push(ya, yb, null, yb, yb + hl * (-uy * ca - ux * sa), null, yb, yb + hl * (-uy * ca + ux * sa), null);
         });

@@ -12,7 +12,10 @@
 //   2. Odd mode: a line between two signal conductors is drawn once, not twice.
 //   3. Coax: |E| on the plot grid follows V/(r·ln(b/a)) up to the inner conductor, with
 //      no spike from the mesh hole of the round conductor and the conductor at 1 V.
+//   4. Contour lines (src/isolines.js): closed circles of the right radius, one polyline
+//      per level, lines end at masked cells.
 import { electricFieldLines } from '../src/streamlines.js';
+import { isoLines } from '../src/isolines.js';
 import { CoaxSolver } from '../src/coax.js';
 import { initTriBackend, TriBackend } from '../src/tri_solver/tri_backend.js';
 
@@ -113,6 +116,20 @@ const lines = (fl) => {
     check('|E| within 1.5 % of the closed form beyond 2 % of a from the surface', worst < 0.015, `${(100 * worst).toFixed(2)} %`);
     check('mean |E| error below 0.2 %', sum / n < 0.002, `${(100 * sum / n).toFixed(3)} %`);
     check('inner conductor interior at its potential', Math.abs(vMin - 1) < 1e-9 && Math.abs(vMax - 1) < 1e-9, `${vMin}…${vMax}`);
+}
+
+// ---- 4: contour lines ----
+{
+    const xs = axis(-1, 1, 201), ys = axis(-1, 1, 201);
+    const z = Array.from(ys, (y) => Float64Array.from(xs, (x) => Math.hypot(x, y)));
+    const l = lines(Object.fromEntries(Object.entries(isoLines(xs, ys, z, [0.3, 0.6])).map(([k, v]) => [k, v.map(q => (q === null ? null : q * 1000))])));
+    const rErr = Math.max(...l.flat().map(([x, y]) => Math.min(Math.abs(Math.hypot(x, y) - 0.3), Math.abs(Math.hypot(x, y) - 0.6))));
+    const closed = l.every(p => Math.hypot(p[0][0] - p[p.length - 1][0], p[0][1] - p[p.length - 1][1]) < 1e-12);
+    check('contour lines: one closed polyline per circle', l.length === 2 && closed, `${l.length} polylines`);
+    check('contour lines on the circle', rErr < 1e-3, `max radius error ${rErr.toExponential(1)}`);
+    const zm = z.map((row) => Array.from(row, (v, i) => (xs[i] < 0 ? null : v)));
+    const lm = lines(Object.fromEntries(Object.entries(isoLines(xs, ys, zm, [0.5])).map(([k, v]) => [k, v.map(q => (q === null ? null : q * 1000))])));
+    check('contour lines stop at masked cells', lm.length === 1 && lm[0].every(([x]) => x >= 0), `${lm.length} polyline(s)`);
 }
 
 console.log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed');
