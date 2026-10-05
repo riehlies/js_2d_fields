@@ -7,7 +7,8 @@
          in the About tab, and metadata for the hosted version (advpcb.davidriehl.de/tl);
          2026-10-02: plot options for field lines, contour lines and excitation with their help
          texts, the arrow and log / linear selection moved into the plot, the Losses view, the
-         Full-wave solver as the default.
+         Full-wave solver as the default; 2026-10-05: separate upper trace width of the
+         broadside coupled stripline.
          See FORK_CHANGES.md. -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -280,8 +281,12 @@
         </div>
         <div class="section-content">
             <div class="control-group">
-                <label>Trace Width</label>
+                <label>Trace Width (bottom)</label>
                 <input type="text" class="unit-input" id="inp_bs_w" value="0.2 mm">
+            </div>
+            <div class="control-group">
+                <label>Trace Width (top) <span class="help-icon" onclick="showHelpModal('bs_w_top', event)">?</span></label>
+                <input type="text" class="unit-input" id="inp_bs_w_top" value="" placeholder="same as bottom">
             </div>
             <div class="control-group">
                 <label>Trace Thickness</label>
@@ -1176,6 +1181,10 @@
         bs_h_bottom: {
             title: 'Bottom Substrate Height',
             body: '<p>Distance from the top surface of the bottom ground plane to the bottom reference of the lower conductor (i.e. the bottom of the lower conductor when trace thickness is positive).</p>'
+        },
+        bs_w_top: {
+            title: 'Trace Width (top)',
+            body: '<p>Width of the upper trace. Leave empty for the same width as the lower trace (Trace Width (bottom)).</p><p>Unequal widths make the pair asymmetric: the two traces carry different charge per volt, the odd and even modes no longer split the pair symmetrically, and the solver uses the genuine line modes of the pair. The X Offset moves the centre of the upper trace.</p>'
         },
         bs_h_middle: {
             title: 'Middle Substrate Height',

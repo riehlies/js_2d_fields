@@ -6,7 +6,7 @@ transmission line field solver. It is based on upstream commit `318300a`
 (2026-09-19) and, like the original, licensed under the
 [GNU General Public License v3](LICENSE).
 
-Changes by David Riehl, 2026-10-01 and 2026-10-02. Every modified file carries a `MODIFIED`
+Changes by David Riehl, 2026-10-01 to 2026-10-05. Every modified file carries a `MODIFIED`
 note at its top, new files carry their own copyright header. The original
 copyright notices are unchanged.
 
@@ -153,6 +153,18 @@ the time display adds little beyond "E and H are in phase", while its
 switching color scales (signed, one-sided, log or not) confused more than they
 showed.
 
+### Broadside coupled stripline: separate upper trace width (2026-10-05)
+
+*Trace Width (top)* sets the width of the upper trace (empty: the same as
+*Trace Width (bottom)*, so existing links keep their geometry). The upper trace
+is centred on the X Offset. The auto domain width, the enclosure check and the
+strong-coupling warning use the wider trace, the full-wave mesh starts from the
+narrower one. Unequal widths make the pair asymmetric; the solvers already
+handle that with the genuine line modes of the pair (as for an unequal
+dielectric stack). Example (0.2 mm bottom, 0.1 mm top, 0.2 mm layers, εr 4.4,
+1 GHz): Z<sub>odd</sub> 32.1 Ω quasi-static / 32.6 Ω full-wave (26.6 / 27.0 Ω
+with equal widths).
+
 ### How the fields are computed
 
 The MQS solve works with the vector potential A<sub>z</sub> on a P2 mesh that
@@ -204,12 +216,14 @@ J(s) = K·γ·cosh(γ(d − s)) / sinh(γd), γ = (1 + j)/δ.
 | `src/solve_worker.js` | New `mqsField` job, keeps the last simulation's solver |
 | `src/plot.js` | New views and arrows (builders in `field_views.js`), excitation, menu row in the plot (view, log / linear, arrows, odd / even), attenuation for the losses view, conductors below the traces |
 | `src/app_solver.js` | On-demand field request, scale dialog types (real values for log scales), plot option handlers |
-| `src/field_solver.html` | Plot options, help texts, fork notice in the About tab, Full-wave solver as the default |
+| `src/field_solver.html` | Plot options, help texts, fork notice in the About tab, Full-wave solver as the default, *Trace Width (top)* of the broadside stripline |
+| `src/broadside_stripline.js`, `src/solver_factory.js` | Separate upper trace width of the broadside coupled stripline (`trace_width_top`, setting `bs_w_top`) |
 | `tests/test_mqs_field.js` | **New.** 18 checks: current normalization (exact FEM integral), Ampère's law ±1 A per trace for every MQS path (single-ended, odd/even on half and full domain, stripline), uniform current at 100 kHz, skin decay length = δ at 10 GHz, wall slab current, refusals |
 | `tests/test_analytic_fields.js` | **New.** 12 checks: Bessel reference values, coax ±1 A and DC limit, R from the plotted coax current vs the solver's R (1 and 10 GHz), waveguide 1 W normalization, α<sub>c</sub> from the plotted wall current vs the solver's α<sub>c</sub>, below-cutoff refusal |
 | `tests/test_field_excitation.js` | **New.** V / I / P conversion (peak, RMS, lossy Z<sub>c</sub>, differential), waveguide, label formatting |
 | `tests/test_field_lines.js` | **New.** 11 checks: flux-weighted seeding with a dielectric, de-duplicated lines between two conductors, coax \|E\| on the plot grid vs the closed form, contour lines (closed, on the circle, ending at masked cells) |
 | `tests/test_field_views.js` | **New.** 15 checks: ∫S dA = n·½Re(V·I*) for microstrip (1 V, 1 W), pair odd / even, coax, waveguide; color scales (potential symmetric, \|E\| log, J signed); losses against 2αP (microstrip dielectric, coax conductor and dielectric) |
+| `tests/test_geometry.js` | Broadside: separate upper trace width (4 checks) |
 | `tests/run.mjs` | New tests registered in the fast tier |
 | `src/snp_export.js` | Touchstone header names the hosted version and the original |
 | `deploy/make_site.mjs`, `deploy/htaccess`, `deploy/index.html` | **New.** Upload folder for the hosted version |

@@ -1,3 +1,7 @@
+// MODIFIED 2026-10-05 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
+// separate width of the upper trace (trace_width_top, default: trace_width).
+// See FORK_CHANGES.md for the full list of changes.
+
 import { FieldSolver2D } from './field_solver.js';
 import { Dielectric, Conductor, Mesher } from './mesher.js';
 
@@ -6,7 +10,9 @@ import { Dielectric, Conductor, Mesher } from './mesher.js';
  *
  * Two signal traces stacked vertically inside three dielectric layers
  * (bottom, middle, top), enclosed top and bottom by ground planes.
- * The upper trace can be horizontally offset relative to the lower one.
+ * The upper trace can be horizontally offset relative to the lower one and can have
+ * its own width (trace_width_top; trace_width is the lower trace, and the upper one
+ * too when trace_width_top is not given).
  *
  * Always differential. Lower trace polarity = -1, upper = +1.
  *
@@ -32,7 +38,8 @@ class BroadsideStriplineSolver extends FieldSolver2D {
 
         this._validate_parameters(options);
 
-        this.w = options.trace_width;
+        this.w = options.trace_width;                           // lower trace
+        this.w_top = options.trace_width_top ?? options.trace_width;   // upper trace
         this.t = options.trace_thickness;
         this.t_gnd = options.gnd_thickness ?? 35e-6;
 
@@ -83,7 +90,7 @@ class BroadsideStriplineSolver extends FieldSolver2D {
             // the trace width and the substrate stack.
             // x_offset only translated the upper trace, so it widens the domain
             // by the translation instead of scaling the margin with it.
-            const margin = Math.max(this.w * 8, total_substrate_h * 4);
+            const margin = Math.max(Math.max(this.w, this.w_top) * 8, total_substrate_h * 4);
             this.domain_width = 2 * (margin + Math.abs(this.x_offset));
         }
 
@@ -125,10 +132,12 @@ class BroadsideStriplineSolver extends FieldSolver2D {
         // Threshold lowered 1.75 -> 1.5 after a fuzzer sweep. The bias
         // already reaches +21% at w/gap 1.68 and +26% at 1.70
         // (seeds 1/4), while 1.5-1.6 rows sit ~5-11% (conservative warns).
+        // With unequal widths the wider trace is used (conservative, like x_offset).
         const facing_gap = this.h_middle - 2 * Math.abs(this.t);
-        this._proximityWarn = (facing_gap > 0 && this.w / facing_gap >= 1.5)
+        const w_couple = Math.max(this.w, this.w_top);
+        this._proximityWarn = (facing_gap > 0 && w_couple / facing_gap >= 1.5)
             ? { type: 'accuracy', reason: 'broadside-proximity', mode: 'all', message:
-                `Strongly coupled broadside pair (trace width ${(this.w * 1e6).toFixed(0)} µm vs ` +
+                `Strongly coupled broadside pair (trace width ${(w_couple * 1e6).toFixed(0)} µm vs ` +
                 `${(facing_gap * 1e6).toFixed(0)} µm facing gap): conductor loss accuracy is reduced. ` +
                 `R typically reads up to 50% high in this regime. The full-wave solver models the ` +
                 `broadside proximity effect accurately.` }
@@ -148,6 +157,7 @@ class BroadsideStriplineSolver extends FieldSolver2D {
             else if (v < 0) errors.push(`${name} must be non-negative, got ${v}`);
         };
         positive(options.trace_width, 'trace_width');
+        if (options.trace_width_top != null) positive(options.trace_width_top, 'trace_width_top');
         const nonzero = (v, name) => {
             if (!isNum(v)) errors.push(`${name} must be a valid number (got ${v})`);
             else if (v === 0) errors.push(`${name} must be non-zero`);
@@ -184,9 +194,11 @@ class BroadsideStriplineSolver extends FieldSolver2D {
         if (options.enclosure_width != null && options.enclosure_width !== "auto") {
             positive(options.enclosure_width, 'enclosure_width');
             if (isNum(options.enclosure_width) && isNum(options.trace_width)) {
-                const active_width = options.trace_width + 2 * Math.abs(isNum(options.x_offset) ? options.x_offset : 0);
+                const w_top = isNum(options.trace_width_top) ? options.trace_width_top : options.trace_width;
+                const off = Math.abs(isNum(options.x_offset) ? options.x_offset : 0);
+                const active_width = 2 * Math.max(options.trace_width / 2, w_top / 2 + off);
                 if (active_width >= options.enclosure_width)
-                    errors.push(`Active area width (${(active_width * 1000).toFixed(3)} mm, trace_width + 2 × |x_offset|) must be smaller than the enclosure inner width (${(options.enclosure_width * 1000).toFixed(3)} mm)`);
+                    errors.push(`Active area width (${(active_width * 1000).toFixed(3)} mm, both traces with x_offset) must be smaller than the enclosure inner width (${(options.enclosure_width * 1000).toFixed(3)} mm)`);
             }
         }
         if (errors.length > 0) {
@@ -272,11 +284,11 @@ class BroadsideStriplineSolver extends FieldSolver2D {
             true, -1, this.plating
         ));
 
-        // Upper trace (positive polarity), shifted by x_offset
-        const xl_upper = -this.w / 2 + this.x_offset;
+        // Upper trace (positive polarity), its own width, centre shifted by x_offset
+        const xl_upper = -this.w_top / 2 + this.x_offset;
         conductors.push(new Conductor(
             xl_upper, this.y_upper_trace_start,
-            this.w, abs_t,
+            this.w_top, abs_t,
             true, 1, this.plating
         ));
 

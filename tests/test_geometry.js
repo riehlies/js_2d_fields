@@ -253,6 +253,20 @@ const { trace_width: W, substrate_height: H, trace_thickness: T, gnd_thickness: 
             near(clearance(new BroadsideStriplineSolver({ ...opt, x_offset: off })), base, 1e-15),
             `${(base * 1e3).toFixed(3)} mm`);
     }
+
+    // Separate upper trace width (fork, 2026-10-05): the upper trace gets its own width,
+    // centred on x_offset; without trace_width_top both traces have trace_width.
+    const wid = (c) => c.x_max - c.x_min, ctr = (c) => (c.x_min + c.x_max) / 2;
+    const un = signals(new BroadsideStriplineSolver({ ...opt, trace_width_top: 0.1e-3 })).sort((a, b) => a.y_min - b.y_min);
+    check('broadside: trace_width_top sets the upper trace only',
+        un.length === 2 && near(wid(un[0]), 0.2e-3) && near(wid(un[1]), 0.1e-3), `${wid(un[0])} / ${wid(un[1])}`);
+    check('broadside: upper trace centred on x_offset with its own width',
+        un.length === 2 && near(ctr(un[1]) - ctr(un[0]), opt.x_offset));
+    check('broadside: without trace_width_top both traces are trace_width',
+        sig.length === 2 && near(wid(sig[0]), wid(sig[1])));
+    let rejected = false;
+    try { new BroadsideStriplineSolver({ ...opt, trace_width_top: -0.1e-3 }); } catch { rejected = true; }
+    check('broadside: negative trace_width_top rejected', rejected);
 }
 
 // ---------- _clipDomain unit cases (synthetic rects) ----------

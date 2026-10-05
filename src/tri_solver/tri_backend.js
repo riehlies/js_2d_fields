@@ -1,6 +1,7 @@
 // MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
 // added mqsFieldAt() for the H field / current density plot (MQS export, closed
-// form for coax and rectangular waveguide).
+// form for coax and rectangular waveguide); 2026-10-02: loss density and loss split in the
+// field export; 2026-10-05: mesh reference width of a broadside pair with unequal widths.
 // See FORK_CHANGES.md for the full list of changes.
 //
 // Triangular full-wave FEM backend.
@@ -1011,7 +1012,8 @@ export class TriBackend {
             halfDomainSymmetry(s.conductors, s.dielectrics, s.domain_width, s.is_differential).ok;
 
         const tAbs = Math.max(Math.abs(s.t ?? 35e-6), 1e-9);
-        const wRef = Math.max(s.w ?? (dom.x_max - dom.x_min) / 10, 1e-9);
+        // The narrower trace sets the reference (broadside pair with unequal widths).
+        const wRef = Math.max(Math.min(s.w ?? (dom.x_max - dom.x_min) / 10, s.w_top ?? Infinity), 1e-9);
         // Start coarse; adaptive refinement adds resolution where the field needs it.
         // GRADED (fine at conductors, coarse in the bulk), not uniform: the MQS volume
         // eddy-current loss needs the conductor region resolved, so a uniform ultra-coarse

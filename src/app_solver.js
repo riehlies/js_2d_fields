@@ -1,7 +1,8 @@
 // MODIFIED 2026-10-01 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
 // added the on-demand H / J field request, scale-dialog types and plot option handlers
 // (incl. E / H field arrows); 2026-10-02: excitation controls of the field views, the
-// Losses view, the log / linear menu of the plot; the page opens with the Full-wave solver.
+// Losses view, the log / linear menu of the plot; the page opens with the Full-wave solver;
+// 2026-10-05: separate upper trace width of the broadside coupled stripline.
 // See FORK_CHANGES.md for the full list of changes.
 
 import { Complex } from './complex.js';
@@ -218,6 +219,7 @@ const DEFAULT_SETTINGS = {
     modes_shrink_domain: true, // mesh only the field region of an auto-sized open domain
     // Broadside coupled stripline (display units: mm, μm)
     bs_w: 0.2,           // mm
+    bs_w_top: NaN,       // upper trace width; NaN (empty) = same as bs_w
     bs_t: 35,            // μm
     bs_x_offset: 0,      // mm
     bs_sigma: 5.8e7,
@@ -343,6 +345,7 @@ function getUISettings() {
         modes_mesh_density: parseInt(document.getElementById('modes-mesh-density').value),
         modes_shrink_domain: document.getElementById('modes-shrink-domain').checked,
         bs_w: getDisplayValue('inp_bs_w'),
+        bs_w_top: getDisplayValue('inp_bs_w_top'),
         bs_t: getDisplayValue('inp_bs_t'),
         bs_x_offset: getDisplayValue('inp_bs_x_offset'),
         bs_sigma: getInputValueUnitless('inp_bs_sigma'),
@@ -602,6 +605,7 @@ function restoreSettings(settings) {
 
         // Broadside coupled stripline
         setValueWithUnit('inp_bs_w', fullSettings.bs_w);
+        setValueWithUnit('inp_bs_w_top', fullSettings.bs_w_top);
         setValueWithUnit('inp_bs_t', fullSettings.bs_t);
         setValueWithUnit('inp_bs_x_offset', fullSettings.bs_x_offset);
         document.getElementById('inp_bs_sigma').value = fullSettings.bs_sigma;
@@ -953,6 +957,7 @@ function getGeometryHash() {
         plating_sides: p.plating_sides,
         plating_bottom: p.plating_bottom,
         bs_w: p.bs_w,
+        bs_w_top: p.bs_w_top,
         bs_t: p.bs_t,
         bs_x_offset: p.bs_x_offset,
         bs_sigma: p.bs_sigma,
@@ -1511,6 +1516,7 @@ function getParams() {
         use_causal_materials: document.getElementById('chk_causal_materials').checked,
         // Broadside coupled stripline parameters
         bs_w: getInputValue('inp_bs_w'),
+        bs_w_top: getInputValue('inp_bs_w_top'),
         bs_t: getInputValue('inp_bs_t'),
         bs_x_offset: getInputValue('inp_bs_x_offset'),
         bs_sigma: getInputValueUnitless('inp_bs_sigma'),
@@ -2436,7 +2442,7 @@ function bindEvents() {
         'inp_enclosure_width', 'inp_enclosure_height',
         'inp_rq',
         'inp_plating_sigma', 'inp_plating_t', 'inp_plating_rq',
-        'inp_bs_w', 'inp_bs_t', 'inp_bs_x_offset', 'inp_bs_sigma',
+        'inp_bs_w', 'inp_bs_w_top', 'inp_bs_t', 'inp_bs_x_offset', 'inp_bs_sigma',
         'inp_bs_h_bottom', 'inp_bs_er_bottom', 'inp_bs_tand_bottom',
         'inp_bs_h_middle', 'inp_bs_er_middle', 'inp_bs_tand_middle',
         'inp_bs_h_top', 'inp_bs_er_top', 'inp_bs_tand_top',

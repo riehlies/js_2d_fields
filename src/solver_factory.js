@@ -1,3 +1,6 @@
+// MODIFIED 2026-10-05 by David Riehl (fork of https://github.com/Ttl/js_2d_fields, GPL v3):
+// passes the separate upper trace width of the broadside coupled stripline.
+// See FORK_CHANGES.md for the full list of changes.
 // Solver construction from a plain params object.
 //
 // Deliberately DOM-free: this module is imported both by app_solver.js (main thread, to
@@ -242,6 +245,8 @@ export function buildSolverFromParams(p, onError = null) {
         } else if (p.tl_type === 'broadside_stripline') {
             const options = {
                 trace_width: p.bs_w,
+                // Upper trace width; empty field (NaN) = same as the lower trace.
+                trace_width_top: Number.isFinite(p.bs_w_top) ? p.bs_w_top : undefined,
                 trace_thickness: p.bs_t,
                 x_offset: p.bs_x_offset,
                 sigma_cond: p.bs_sigma,
