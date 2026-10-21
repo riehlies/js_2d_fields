@@ -1,0 +1,102 @@
+// Copyright (C) 2026 David Riehl
+// Part of a modified version (fork) of js_2d_fields by Henrik Forstén,
+// https://github.com/Ttl/js_2d_fields. This file is new in the fork and is licensed
+// under the GNU General Public License v3, like the rest of the project (see
+// LICENSE). See FORK_CHANGES.md for the list of changes.
+//
+// Field-line placement (src/fork/field_lines.js) and contour lines (src/fork/isolines.js).
+//   1. Equal flux per line: a line charge with a dielectric (εr = 4) below it and air
+//      above sends 4/5 of its flux D = εE downwards, so 4/5 of the lines must start on
+//      the lower half of the conductor.
+//   2. Odd mode: a line between two signal conductors is drawn once, not twice.
+//   3. Contour lines (src/isolines.js): closed circles of the right radius, one polyline
+//      per level, lines end at masked cells.
+import { electricFieldLines } from '../../src/fork/field_lines.js';
+import { isoLines } from '../../src/fork/isolines.js';
+
+let failures = 0;
+function check(name, ok, detail = '') {
+    console.log(`${ok ? '✓ PASS' : '✗ FAIL'}  ${name}${detail ? '  (' + detail + ')' : ''}`);
+    if (!ok) failures++;
+}
+
+const axis = (a, b, n) => Float64Array.from({ length: n }, (_, i) => a + (b - a) * i / (n - 1));
+const grid = (xs, ys, fn) => {
+    const Ex = [], Ey = [];
+    for (const y of ys) {
+        const rx = new Float64Array(xs.length), ry = new Float64Array(xs.length);
+        xs.forEach((x, i) => { const [ex, ey] = fn(x, y); rx[i] = ex; ry[i] = ey; });
+        Ex.push(rx); Ey.push(ry);
+    }
+    return { Ex, Ey };
+};
+// Polylines → list of [start, end] points.
+const lines = (fl) => {
+    const out = [];
+    let cur = [];
+    for (let k = 0; k < fl.x.length; k++) {
+        if (fl.x[k] === null) { if (cur.length) out.push(cur); cur = []; }
+        else cur.push([fl.x[k] / 1000, fl.y[k] / 1000]);
+    }
+    if (cur.length) out.push(cur);
+    return out;
+};
+
+// ---- 1: flux weighting with a dielectric ----
+{
+    const xs = axis(-1, 1, 401), ys = axis(-1, 1, 401);
+    const { Ex, Ey } = grid(xs, ys, (x, y) => { const r2 = x * x + y * y || 1e-12; return [x / r2, y / r2]; });
+    const a = 0.05;
+    const conductors = [{ is_signal: true, x_min: -a, x_max: a, y_min: -a, y_max: a, width: 2 * a, height: 2 * a }];
+    const n = 40;
+    const fl = electricFieldLines({ Ex, Ey, x: xs, y: ys, conductors, epsAt: (x, y) => (y < 0 ? 4 : 1), n });
+    const ls = lines(fl);
+    const down = ls.filter(l => l[0][1] < 0).length;
+    check('every line is drawn', ls.length === n, `${ls.length}`);
+    check('4/5 of the lines start into the εr = 4 half', Math.abs(down / ls.length - 0.8) <= 0.05, `${down} of ${ls.length}`);
+    const flAir = electricFieldLines({ Ex, Ey, x: xs, y: ys, conductors, epsAt: () => 1, n });
+    const downAir = lines(flAir).filter(l => l[0][1] < 0).length;
+    check('without the dielectric half of them', Math.abs(downAir / n - 0.5) <= 0.05, `${downAir} of ${n}`);
+}
+
+// ---- 2: odd mode, lines between two conductors drawn once ----
+{
+    const xs = axis(-1, 1, 401), ys = axis(-1, 1, 401);
+    const d = 0.3, a = 0.05;
+    // Two opposite line charges at x = ±d: E = r̂₊/r₊ − r̂₋/r₋.
+    const { Ex, Ey } = grid(xs, ys, (x, y) => {
+        const x1 = x + d, x2 = x - d;
+        const r1 = x1 * x1 + y * y || 1e-12, r2 = x2 * x2 + y * y || 1e-12;
+        return [x1 / r1 - x2 / r2, y / r1 - y / r2];
+    });
+    const sq = (cx) => ({ is_signal: true, x_min: cx - a, x_max: cx + a, y_min: -a, y_max: a, width: 2 * a, height: 2 * a });
+    const conductors = [sq(-d), sq(d)];
+    const n = 30;
+    const ls = lines(electricFieldLines({ Ex, Ey, x: xs, y: ys, conductors, epsAt: () => 1, n }));
+    const joining = ls.filter(l => {
+        const s = l[0], e = l[l.length - 1];
+        const near = (p, cx) => Math.abs(p[0] - cx) <= a * 1.01 && Math.abs(p[1]) <= a * 1.01;
+        return (near(s, -d) && near(e, d)) || (near(s, d) && near(e, -d));
+    }).length;
+    // All flux of a symmetric dipole inside the box joins the two conductors (apart from
+    // the lines leaving the plotted area): without the de-duplication there would be
+    // about n lines between them, with it about n/2.
+    check('lines between the conductors are drawn once', joining > 0.3 * n && joining <= 0.55 * n, `${joining} of ${n}`);
+}
+
+// ---- 3: contour lines ----
+{
+    const xs = axis(-1, 1, 201), ys = axis(-1, 1, 201);
+    const z = Array.from(ys, (y) => Float64Array.from(xs, (x) => Math.hypot(x, y)));
+    const l = lines(Object.fromEntries(Object.entries(isoLines(xs, ys, z, [0.3, 0.6])).map(([k, v]) => [k, v.map(q => (q === null ? null : q * 1000))])));
+    const rErr = Math.max(...l.flat().map(([x, y]) => Math.min(Math.abs(Math.hypot(x, y) - 0.3), Math.abs(Math.hypot(x, y) - 0.6))));
+    const closed = l.every(p => Math.hypot(p[0][0] - p[p.length - 1][0], p[0][1] - p[p.length - 1][1]) < 1e-12);
+    check('contour lines: one closed polyline per circle', l.length === 2 && closed, `${l.length} polylines`);
+    check('contour lines on the circle', rErr < 1e-3, `max radius error ${rErr.toExponential(1)}`);
+    const zm = z.map((row) => Array.from(row, (v, i) => (xs[i] < 0 ? null : v)));
+    const lm = lines(Object.fromEntries(Object.entries(isoLines(xs, ys, zm, [0.5])).map(([k, v]) => [k, v.map(q => (q === null ? null : q * 1000))])));
+    check('contour lines stop at masked cells', lm.length === 1 && lm[0].every(([x]) => x >= 0), `${lm.length} polyline(s)`);
+}
+
+console.log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed');
+process.exit(failures ? 1 : 0);

@@ -137,7 +137,7 @@
         <label for="mesh_backend">Solver <span class="help-icon" onclick="showHelpModal('solver', event)">?</span></label>
         <select id="mesh_backend">
             <option value="rectilinear">Quasi-static</option>
-            <option value="fullwave_mqs">Full-wave</option>
+            <option value="fullwave_mqs" selected>Full-wave</option><!-- FORK: default -->
         </select>
     </div>
 
@@ -2253,5 +2253,6 @@
     });
 </script>
 <script type="module" src="app_solver.js"></script>
+<script type="module" src="fork/plot_fields.js"></script><!-- FORK: field views (src/fork) -->
 </body>
 </html>

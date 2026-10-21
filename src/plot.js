@@ -1178,6 +1178,7 @@ function draw(resetZoom = false) {
     const solver = get.solver();
     const Plotly = getPlotly();
     if (!solver || !Plotly) return;
+    if (window.forkPlot && window.forkPlot.draw(resetZoom, get)) return;   // FORK: field views (src/fork)
     currentView = viewAvailable(wantedView, solver) ? wantedView : "geometry";
 
     const container = document.getElementById('sim_canvas');

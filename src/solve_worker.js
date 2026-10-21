@@ -39,6 +39,7 @@ import { buildSolverFromParams } from './solver_factory.js';
 import { InterpolatingSweep } from './interpolating_sweep.js';
 import { channelLowFreq } from './eye/channel_grid.js';
 import { hasConductiveDielectric } from './conductive_dielectric.js';
+import { forkJobs } from './fork/worker_jobs.js';   // FORK: field views (src/fork)
 
 let stopRequested = false;
 let currentId = null;
@@ -576,6 +577,7 @@ const JOBS = {
     plotFields: jobPlotFields,
     plotRelease: jobPlotRelease,
     eyeChannel: jobEyeChannel,
+    ...forkJobs(() => simSolver),   // FORK: field views (src/fork)
 };
 
 async function runJob(msg) {

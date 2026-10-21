@@ -915,6 +915,7 @@ function getWorker() {
     return _worker;
 }
 
+window.forkWorkerJob = (type, payload) => workerJob(type, payload); window.forkLog = (m) => log(m);   // FORK: field views (src/fork)
 function workerJob(type, payload, handlers = {}) {
     const w = getWorker();
     const id = ++_workerJobId;
