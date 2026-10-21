@@ -88,6 +88,12 @@ see `src/wasm_solver/README.md`) or taken from the original's site. Its C++
 sources changed since `318300a`, so the binaries of the hosted fork version are
 outdated.
 
+Built for this branch on 2026-10-21 with Emscripten 6.0.0, LLVM 23.1.4 and
+Binaryen 129 (the versions Emscripten 6.0.0 expects), Eigen `fdfdd4c` with
+`eigen.patch`, Spectra `3133be5`, flags from the Makefile:
+`make solver eigen_solver fft`. `gmsh.wasm` is unchanged (gmsh sources are the
+same as in the hosted version). The binaries are not in git (`.gitignore`).
+
 ## Checks (2026-10-21, this branch)
 
 - `node tests/fork/run.mjs`: excitation, field lines, contract test all pass.
@@ -97,7 +103,7 @@ outdated.
   normalized to the trace voltage (exact with the static E). Loss split of the
   adapter = ½·R·(1 A)² of the solver within 0.01 %; dielectric loss map = 2α<sub>d</sub>P
   within 0.4 %, coax rings within 0.3 %.
-- `node tests/run.mjs fast`: 28 / 30, the two failures are the eye tests, which need
-  the not yet built `fft.wasm`.
+- `node tests/run.mjs fast`: 30 / 30 with the binaries built above (eye /
+  transient tests included).
 - Browser: all views for microstrip, differential pair, coax and waveguide, no
-  console errors.
+  console errors; `fft.wasm` loads in the page.
