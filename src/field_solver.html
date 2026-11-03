@@ -3,25 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-    <link rel="manifest" href="/site.webmanifest">
-    <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
-    <meta name="msapplication-TileColor" content="#da532c">
-    <meta name="theme-color" content="#ffffff">
-    <link rel="canonical" href="https://hforsten.com/field_solver.html">
-    <meta name="author" content="Henrik Forstén" />
-    <meta name="description" content="2D transmission line field solver" />
-    <meta property="og:site_name" content="Henrik's Blog" />
-    <meta property="og:type" content="article"/>
+    <!-- FORK: metadata of the modified version (advpcb.davidriehl.de/tl), not the original's site -->
+    <link rel="canonical" href="https://advpcb.davidriehl.de/tl/field_solver.html">
+    <meta name="author" content="Henrik Forstén (original), David Riehl (modifications)" />
+    <meta name="description" content="2D transmission line field solver with E, H, current density, power flow and loss views (modified version of the solver by Henrik Forstén)" />
+    <meta property="og:type" content="website"/>
     <meta property="og:title" content="2D Transmission Line Field Solver"/>
-    <meta property="og:url" content="https://hforsten.com/field_solver.html"/>
-    <meta property="og:description" content="2D transmission line field solver"/>
-    <meta property="article:published_time" content="2026-01-27" />
-    <meta property="article:section" content="Electronics" />
-    <meta property="article:author" content="Henrik Forstén" />
-    <meta property="og:image" content="https://hforsten.com/img/field-solver/header.png"/>
+    <meta property="og:url" content="https://advpcb.davidriehl.de/tl/field_solver.html"/>
+    <meta property="og:description" content="2D transmission line field solver with E, H, current density, power flow and loss views"/>
     <title>2D Transmission Line Field Solver</title>
     <script>
         // Load Plotly dynamically after page renders to avoid blocking
@@ -327,8 +316,12 @@
         </div>
         <div class="section-content">
             <div class="control-group">
-                <label>Trace Width</label>
+                <label>Trace Width (bottom)</label>
                 <input type="text" class="unit-input" id="inp_bs_w" value="0.2 mm">
+            </div>
+            <div class="control-group"><!-- FORK: upper trace width -->
+                <label>Trace Width (top) <span class="help-icon" onclick="showHelpModal('bs_w_top', event)">?</span></label>
+                <input type="text" class="unit-input" id="inp_bs_w_top" value="" placeholder="same as bottom">
             </div>
             <div class="control-group">
                 <label>Trace Thickness</label>
@@ -1117,6 +1110,9 @@
         <div class="about-content">
             <h2>2D Transmission Line Field Solver</h2>
             <p>by <a href="https://hforsten.com" target="_blank">Henrik Forstén</a> | <a href="https://github.com/Ttl/js_2d_fields" target="_blank">Source code & issues</a></p>
+            <!-- FORK: notice of the modified version and license -->
+            <p style="padding: 8px 10px; background: #1f2d3d; border-left: 3px solid #4a9eff; border-radius: 3px;"><b>Modified version.</b> This is a modified version (fork) of the original solver by Henrik Forstén. It adds the <b>|H| Field</b>, <b>Current J</b>, <b>Power flow S</b> and <b>Losses</b> views and the E / H / S field arrows (magnetic field, conductor and ground current density from the eddy-current solve, closed-form fields for coax and rectangular waveguide, Poynting vector, where conductor and dielectric loss arise), electric field lines and equipotentials, one excitation (voltage, current or power) for all field views and a separate upper trace width of the broadside coupled stripline; it opens with the Full-wave solver. Modifications by David Riehl, 2026. Source code of this version: <a href="https://github.com/riehlies/js_2d_fields" target="_blank">github.com/riehlies/js_2d_fields</a>, list of changes: <a href="https://github.com/riehlies/js_2d_fields/blob/master/FORK.md" target="_blank">FORK.md</a>. The original is at <a href="https://github.com/Ttl/js_2d_fields" target="_blank">github.com/Ttl/js_2d_fields</a>.</p>
+            <p style="font-size: 0.85em; color: #aaa;">Copyright &copy; Henrik Forstén (original solver), &copy; 2026 David Riehl (modifications). This program is free software: you can redistribute it and/or modify it under the terms of the <a href="LICENSE.txt" target="_blank">GNU General Public License version 3</a>. It is distributed in the hope that it will be useful, but <b>WITHOUT ANY WARRANTY</b>; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. Results are not guaranteed to be correct; verify critical designs independently. The complete corresponding source code, including the build instructions of the WebAssembly modules, is available at <a href="https://github.com/riehlies/js_2d_fields" target="_blank">github.com/riehlies/js_2d_fields</a>. Third-party components and their licenses: <a href="THIRD_PARTY_NOTICES.txt" target="_blank">THIRD_PARTY_NOTICES.txt</a>.</p>
             <p style="color: #888; font-size: 0.85em;">Version: BUILD_VERSION</p>
             <p>A quasi-static and full-wave 2D field solver for transmission line analysis with adaptive mesh refinement.</p>
             <p>Everything runs locally in your browser and nothing is uploaded to a server.</p>
@@ -1429,6 +1425,7 @@
             'inp_wg_a': 'mm',
             'inp_wg_b': 'mm',
             'inp_bs_w': 'mm',
+            'inp_bs_w_top': 'mm',   // FORK
             'inp_bs_x_offset': 'mm',
             'inp_bs_h_bottom': 'mm',
             'inp_bs_h_middle': 'mm',
@@ -1874,6 +1871,10 @@
         top_diel_layer: {
             title: 'Top Dielectric Layer',
             body: '<p>Extra dielectric layer on the substrate surface. It starts at the trace bottom and extends upward by its height, so the trace is embedded in it (fully when the layer is thicker than the trace).</p><p>Microstrip and GCPW: the layer is added on top of the substrate, below the air (or enclosure) region.</p><p>Stripline: the layer is carved out of the bottom of the stripline top dielectric, so the ground-to-ground spacing stays substrate height + top dielectric height. Its height must be smaller than the stripline top dielectric height. Set its permittivity to 1 to model air beside the trace.</p>'
+        },
+        bs_w_top: {   // FORK
+            title: 'Trace Width (top)',
+            body: '<p>Width of the upper trace. Leave empty for the same width as the lower trace (Trace Width (bottom)).</p><p>Unequal widths make the pair asymmetric: the two traces carry different charge per volt, the odd and even modes no longer split the pair symmetrically, and the solver uses the genuine line modes of the pair. The X Offset moves the centre of the upper trace.</p>'
         },
         bs_h_bottom: {
             title: 'Bottom Substrate Height',

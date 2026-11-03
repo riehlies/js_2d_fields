@@ -176,6 +176,8 @@ export function buildSolverFromParams(p, onError = null) {
         } else if (p.tl_type === 'broadside_stripline') {
             const options = {
                 trace_width: p.bs_w,
+                // FORK: upper trace width; empty field (NaN) = same as the lower trace.
+                trace_width_top: Number.isFinite(p.bs_w_top) ? p.bs_w_top : undefined,
                 trace_thickness: p.bs_t,
                 x_offset: p.bs_x_offset,
                 sigma_cond: p.bs_sigma,

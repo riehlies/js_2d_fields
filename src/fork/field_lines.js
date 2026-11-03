@@ -3,7 +3,7 @@
 // line carries the same charge), cover all signal conductors with one budget, are traced
 // with an adaptive RK4 step on a binary-search grid sampler, stop in field-free regions
 // instead of drifting, and lines between two signal conductors are drawn once.
-// See FORK_CHANGES.md for the full list of changes.
+// See FORK.md for the list of changes.
 //
 // Electric field lines of a quasi-TEM cross-section.
 //

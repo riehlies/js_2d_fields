@@ -1216,7 +1216,8 @@ export class TriBackend {
             halfDomainSymmetry(s.conductors, s.dielectrics, s.domain_width, s.is_differential).ok;
 
         const tAbs = Math.max(Math.abs(s.t ?? 35e-6), 1e-9);
-        const wRef = Math.max(s.w ?? (dom.x_max - dom.x_min) / 10, 1e-9);
+        // FORK: the narrower trace sets the reference (broadside pair with unequal widths).
+        const wRef = Math.max(Math.min(s.w ?? (dom.x_max - dom.x_min) / 10, s.w_top ?? Infinity), 1e-9);
         // Base mesh: graded, fine at the conductors and coarse in the bulk, and the
         // adaptive passes add resolution where the field needs it. hFine is 1.5 times a
         // thickness term, capped at w/4. The term is 2t on the MQS loss path, where the

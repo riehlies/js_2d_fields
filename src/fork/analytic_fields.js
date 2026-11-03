@@ -2,7 +2,7 @@
 // Part of a modified version (fork) of js_2d_fields by Henrik Forstén,
 // https://github.com/Ttl/js_2d_fields. This file is new in the fork and is licensed
 // under the GNU General Public License v3, like the rest of the project (see
-// LICENSE). See FORK_CHANGES.md for the list of changes.
+// LICENSE). See FORK.md for the list of changes.
 //
 // Closed-form magnetic field and current density for the two media the MQS
 // eddy-current field export does not cover: the concentric coax and the

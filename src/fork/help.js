@@ -2,7 +2,7 @@
 // Part of a modified version (fork) of js_2d_fields by Henrik Forstén,
 // https://github.com/Ttl/js_2d_fields. This file is new in the fork and is licensed
 // under the GNU General Public License v3, like the rest of the project (see
-// LICENSE). See FORK_CHANGES.md for the list of changes.
+// LICENSE). See FORK.md for the list of changes.
 //
 // Help texts of the fork's field views (shown in the original's help modal).
 

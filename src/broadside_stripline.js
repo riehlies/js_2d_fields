@@ -6,7 +6,9 @@ import { Dielectric, Conductor, Mesher, DEFAULT_GRID_N } from './mesher.js';
  *
  * Two signal traces stacked vertically inside three dielectric layers
  * (bottom, middle, top), enclosed top and bottom by ground planes.
- * The upper trace can be horizontally offset relative to the lower one.
+ * The upper trace can be horizontally offset relative to the lower one and can have
+ * its own width (trace_width_top; trace_width is the lower trace, and the upper one
+ * too when trace_width_top is not given).   FORK: separate upper trace width
  *
  * Always differential. Lower trace polarity = -1, upper = +1.
  *
@@ -32,7 +34,8 @@ class BroadsideStriplineSolver extends FieldSolver2D {
 
         this._validate_parameters(options);
 
-        this.w = options.trace_width;
+        this.w = options.trace_width;                                   // lower trace
+        this.w_top = options.trace_width_top ?? options.trace_width;   // upper trace (FORK)
         this.t = options.trace_thickness;
         this.t_gnd = options.gnd_thickness ?? 35e-6;
 
@@ -83,7 +86,7 @@ class BroadsideStriplineSolver extends FieldSolver2D {
             // the trace width and the substrate stack.
             // x_offset only translated the upper trace, so it widens the domain
             // by the translation instead of scaling the margin with it.
-            const margin = Math.max(this.w * 8, total_substrate_h * 4);
+            const margin = Math.max(Math.max(this.w, this.w_top) * 8, total_substrate_h * 4);   // FORK: wider trace
             this.domain_width = 2 * (margin + Math.abs(this.x_offset));
         }
 
@@ -115,6 +118,7 @@ class BroadsideStriplineSolver extends FieldSolver2D {
         const errors = [];
         const { isNum, positive, nonneg } = paramChecks(errors);
         positive(options.trace_width, 'trace_width');
+        if (options.trace_width_top != null) positive(options.trace_width_top, 'trace_width_top');   // FORK
         const nonzero = (v, name) => {
             if (!isNum(v)) errors.push(`${name} must be a valid number (got ${v})`);
             else if (v === 0) errors.push(`${name} must be non-zero`);
@@ -151,9 +155,12 @@ class BroadsideStriplineSolver extends FieldSolver2D {
         if (options.enclosure_width != null && options.enclosure_width !== "auto") {
             positive(options.enclosure_width, 'enclosure_width');
             if (isNum(options.enclosure_width) && isNum(options.trace_width)) {
-                const active_width = options.trace_width + 2 * Math.abs(isNum(options.x_offset) ? options.x_offset : 0);
+                // FORK: both traces, the upper one with its own width and the offset
+                const w_top = isNum(options.trace_width_top) ? options.trace_width_top : options.trace_width;
+                const off = Math.abs(isNum(options.x_offset) ? options.x_offset : 0);
+                const active_width = 2 * Math.max(options.trace_width / 2, w_top / 2 + off);
                 if (active_width >= options.enclosure_width)
-                    errors.push(`Active area width (${(active_width * 1000).toFixed(3)} mm, trace_width + 2 × |x_offset|) must be smaller than the enclosure inner width (${(options.enclosure_width * 1000).toFixed(3)} mm)`);
+                    errors.push(`Active area width (${(active_width * 1000).toFixed(3)} mm, both traces with x_offset) must be smaller than the enclosure inner width (${(options.enclosure_width * 1000).toFixed(3)} mm)`);
             }
         }
         throwIfErrors(errors);
@@ -237,11 +244,11 @@ class BroadsideStriplineSolver extends FieldSolver2D {
             true, -1, this.plating
         ));
 
-        // Upper trace (positive polarity), shifted by x_offset
-        const xl_upper = -this.w / 2 + this.x_offset;
+        // Upper trace (positive polarity), its own width (FORK), centre shifted by x_offset
+        const xl_upper = -this.w_top / 2 + this.x_offset;
         conductors.push(new Conductor(
             xl_upper, this.y_upper_trace_start,
-            this.w, abs_t,
+            this.w_top, abs_t,
             true, 1, this.plating
         ));
 

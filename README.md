@@ -1,5 +1,21 @@
 # 2D Transmission Line Field Solver
 
+> **Fork notice.** This is a modified version of
+> [js_2d_fields](https://github.com/Ttl/js_2d_fields) by Henrik Forstén.
+> It adds **|H| Field**, **Current J**, **Power flow S** and **Losses** views
+> (magnetic field, conductor current density from the eddy-current solve,
+> Poynting vector, where conductor and dielectric loss arise), E / H / S
+> arrows, field lines and equipotentials, and one excitation (voltage, current
+> or power) for all field views; it opens with the Full-wave solver. Made for
+> teaching (Advanced PCB Design). Changes by David Riehl, 2026, see
+> [FORK.md](FORK.md); the fork code is a separate layer in `src/fork/`, so the
+> original can be merged in again. Licensed under the GNU GPL v3 like the
+> original. This version runs online at
+> https://advpcb.davidriehl.de/tl/field_solver.html (build the upload folder
+> with `node deploy/make_site.mjs`); the online version linked below is the
+> original, without these changes. Third-party components:
+> [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
+
 ![Header](https://github.com/Ttl/js_2d_fields/blob/master/docs/header.png?raw=true)
 
 A browser-based quasi-static and full-wave 2D field solver for transmission line analysis. Computes characteristic impedance, effective permittivity, RLGC parameters, losses, and S-parameters.
@@ -14,7 +30,7 @@ Try it online: https://hforsten.com/field_solver.html
 - Loss Modeling: Conductor losses (skin effect, surface roughness) and dielectric losses
 - S-Parameter Export: Touchstone .s2p and .s4p file generation
 - Time Domain (Eye tab): step, pulse, clock and PRBS/custom bit-pattern responses with eye diagrams; voltage- and current-mode (LVDS) drivers, AC coupling, pad capacitance, receiver terminations, TX FIR (PCIe presets), CTLE and DFE; presets for LVDS, PCIe Gen1-5, LVPECL and LVCMOS
-- Visualization: 2D potential plots, E-field streamlines, frequency-dependent plots
+- Visualization: 2D potential plots, E-field streamlines, H field with field lines, conductor current density, power flow and loss density (fork), frequency-dependent plots
 - Adaptive Meshing: Automatic mesh refinement for accurate field solutions
 
 ## Quick Start

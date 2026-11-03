@@ -2,13 +2,13 @@
 // Part of a modified version (fork) of js_2d_fields by Henrik Forstén,
 // https://github.com/Ttl/js_2d_fields. This file is new in the fork and is licensed
 // under the GNU General Public License v3, like the rest of the project (see
-// LICENSE). See FORK_CHANGES.md for the list of changes.
+// LICENSE). See FORK.md for the list of changes.
 //
 // The fork's field plot: Potential, |E|, |H|, current density, power flow and losses,
 // with field lines, equipotentials, E / H / S arrows, one excitation, log / linear
 // scale, its own menu row, legend memory, scale dialog and help.
 //
-// How it docks onto the original (see FORK_CHANGES.md, "Hooks"):
+// How it docks onto the original (see FORK.md, "Hooks in the original's files"):
 //   - plot.js draw() asks forkPlot.draw(resetZoom, get) first. For a field view it draws
 //     here and returns true; for the Geometry view it returns false, the original draws
 //     its geometry, and the menu row is swapped for ours afterwards (plotly_afterplot).

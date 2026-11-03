@@ -4,7 +4,13 @@ This branch is the original [js_2d_fields](https://github.com/Ttl/js_2d_fields) 
 Henrik Forstén (GPL v3) at upstream commit `b5ea9eb` (2026-10-18) plus the field
 views of the fork, added as a separate layer so that the next update of the
 original touches as little fork code as possible. Changes by David Riehl,
-2026-10-21.
+2026-10-21 and 2026-11-03.
+
+The first version of the fork (2026-10-01 to 2026-10-05, on upstream `318300a`,
+with the changes spread over the original's files and its list of changes in
+`FORK_CHANGES.md`) is kept in the branch
+[`fork-v1`](https://github.com/riehlies/js_2d_fields/tree/fork-v1); it can no
+longer be merged with the original.
 
 ## What the fork adds
 
@@ -23,6 +29,11 @@ Losses**, drawn at the original's *Plot Frequency*:
   with real values, help texts
 - coax and rectangular waveguide from the closed-form fields
 - the page opens with the Full-wave solver
+- broadside coupled stripline: separate width of the upper trace (*Trace Width
+  (top)*, empty = same as the bottom trace)
+- notice of the modified version and the license in the About tab, page
+  metadata of the hosted version, fork notice in the README,
+  `THIRD_PARTY_NOTICES.txt`, the site build in `deploy/`
 
 The Geometry view is the original's (its geometry plot, E contours and streamlines,
 custom-geometry highlights); only its menu row is replaced by the fork's.
@@ -43,6 +54,10 @@ src/fork/                 the fork, nothing of the original inside
                           density on a grid, loss split
   shape_util.js, help.js  small helpers, help texts
 tests/fork/               the fork's tests and the hook check
+deploy/                   upload folder for the web host (make_site.mjs,
+                          .htaccess, index.html)
+THIRD_PARTY_NOTICES.txt   licenses of Plotly, Gmsh, OCCT, Eigen, Spectra,
+                          Emscripten
 ```
 
 Only the two adapter files read internals of the original (TriBackend
@@ -52,7 +67,9 @@ fields it grafts onto the main-thread solver (`x, y, V, Ex, Ey`, `fieldFreq`).
 
 ## Hooks in the original's files
 
-Six lines, each marked `FORK`:
+Every fork line in the original's files is marked `FORK`;
+`tests/fork/check_hooks.mjs` checks them and their number per file. The six
+hooks of the field views:
 
 | File | Line |
 |---|---|
@@ -63,6 +80,20 @@ Six lines, each marked `FORK`:
 | `src/field_solver.html` | `<script type="module" src="fork/plot_fields.js">` |
 | `src/field_solver.html` | `selected` on the Full-wave option |
 
+Further changes of the original's files, also marked `FORK`:
+
+| File | Change |
+|---|---|
+| `src/field_solver.html` | page metadata of the hosted version (canonical URL, author, description instead of the original's site and icons), notice of the modified version and license text in the About tab, input and help text *Trace Width (top)* |
+| `src/app_solver.js` | setting `bs_w_top` (default and settings table) |
+| `src/solver_factory.js` | passes `trace_width_top` |
+| `src/broadside_stripline.js` | upper trace with its own width, domain margin and enclosure check with the wider trace |
+| `src/tri_solver/tri_backend.js` | mesh reference width: the narrower trace |
+| `README.md` | fork notice at the top, visualization line |
+
+The broadside change is independent of the field views and a candidate for a
+pull request to the original.
+
 Not changed: the original's views, menus and scale dialog code stay in place; the
 fork draws instead of them (its menu handler is never bound, the fork's handles all
 menu clicks).
@@ -71,7 +102,7 @@ menu clicks).
 
 ```
 git fetch upstream
-git merge upstream/master          # conflicts only in the six hook lines, if at all
+git merge upstream/master          # conflicts only in FORK-marked lines, if at all
 node tests/fork/check_hooks.mjs    # hooks present, imported functions still exported
 node tests/fork/run.mjs            # contract test: power, losses, scales on the new solver
 ```
@@ -79,6 +110,18 @@ node tests/fork/run.mjs            # contract test: power, losses, scales on the
 If the contract test fails, the fix belongs in `worker_jobs.js` / `mqs_grid.js`.
 Then a look at the page (all views, one single-ended line, a pair, coax,
 waveguide).
+
+## Web host
+
+```
+node deploy/make_site.mjs          # → site/tl (gitignored), upload its content
+```
+
+It copies exactly the files the page loads (following the imports from
+`app_solver.js`, `solve_worker.js` and `fork/plot_fields.js`), the WebAssembly
+modules, Plotly, `LICENSE.txt`, `THIRD_PARTY_NOTICES.txt`, `.htaccess` and an
+`index.html` that redirects the folder to the solver, and writes the version
+(date and commit) into the About tab.
 
 ## WASM
 

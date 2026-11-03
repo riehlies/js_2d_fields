@@ -236,6 +236,7 @@ const DEFAULT_SETTINGS = {
     modes_shrink_domain: true, // mesh only the field region of an auto-sized open domain
     // Broadside coupled stripline (display units: mm, μm)
     bs_w: 0.2,           // mm
+    bs_w_top: NaN,       // mm, upper trace; NaN (empty) = same as bs_w   FORK
     bs_t: 35,            // μm
     bs_x_offset: 0,      // mm
     bs_sigma: 5.8e7,
@@ -353,6 +354,7 @@ const SETTINGS_FIELDS = [
     ['modes_shrink_domain', 'modes-shrink-domain', 'bool', 's'],
     // Broadside coupled stripline
     ['bs_w', 'inp_bs_w', 'unit', 'sphl'],
+    ['bs_w_top', 'inp_bs_w_top', 'unit', 'sphl'],   // FORK: upper trace width
     ['bs_t', 'inp_bs_t', 'unit', 'sphl'],
     ['bs_x_offset', 'inp_bs_x_offset', 'unit', 'sphl'],
     ['bs_sigma', 'inp_bs_sigma', 'num', 'sphl'],
